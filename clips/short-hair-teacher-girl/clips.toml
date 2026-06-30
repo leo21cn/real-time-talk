@@ -1,0 +1,147 @@
+# short-hair-teacher-girl 语义化切片库
+# 每个切片 5 秒，720P，由同一张 base_image 通过 HappyHorse 生成
+# 相邻不同切片间自动插入 0.15s crossfade 过渡
+
+[speaker]
+name = "short-hair-teacher-girl"
+base_image = "speaker-short-hair-teacher-girl.png"
+voice = "Cherry"
+clip_duration = 5
+
+# ---------------------------------------------------------------------------
+# HappyHorse 基础约束（所有切片共用）
+# ---------------------------------------------------------------------------
+# 固定机位中景镜头，人物正面面向观众
+# 保持身体和头部稳定不动，不要推拉摇移缩放，背景保持静止
+# 双手保持在身前不超过肩膀宽度，动作结束时自然回到起始姿态
+# ---------------------------------------------------------------------------
+
+[clips.greeting]
+file = "greeting.webm"
+tags = ["greeting"]
+priority = 1
+prompt = """
+固定机位中景镜头，人物正面面向观众。双手在身前腰部位置，从合拢姿态自然微张约十厘米，做一个欢迎和问候的手势，然后缓慢收回合拢。
+双手保持在身前不超过肩膀宽度，动作结束时回到起始姿态。2D动画风格，cel-shaded，anime art style，保持与原图完全一致的卡通角色外观。
+"""
+speech_hint = "大家好，欢迎来到今天的分享，我是今天的主讲人。"
+
+[clips.introduction]
+file = "introduction.webm"
+tags = ["introduction"]
+priority = 2
+prompt = """
+固定机位中景镜头，人物正面面向观众。右手从身前自然抬起至胸口高度，掌心向上做了一个引导和介绍的手势，然后缓慢放下回到身前。
+双手保持在身前不超过肩膀宽度，动作结束时回到起始姿态。2D动画风格，cel-shaded，anime art style，保持与原图完全一致的卡通角色外观。
+"""
+speech_hint = "今天我想和大家分享一个非常重要的话题，让我们一起来看看。"
+
+[clips.explaining]
+file = "explaining.webm"
+tags = ["explaining"]
+priority = 3
+prompt = """
+固定机位中景镜头，人物正面面向观众。双手在身前做辅助说明的轻微摇摆动作，手指自然并拢，手势柔和流畅，像在画一个圆或展示一个概念。
+双手保持在身前不超过肩膀宽度，动作结束时回到起始姿态。2D动画风格，cel-shaded，anime art style，保持与原图完全一致的卡通角色外观。
+"""
+speech_hint = "这个概念的核心意思是，我们需要从不同的角度来理解这个问题。"
+
+[clips.listing]
+file = "listing.webm"
+tags = ["listing"]
+priority = 4
+prompt = """
+固定机位中景镜头，人物正面面向观众。右手食指依次轻点三下，像在列举一二三，动作轻快有力，每次点指间隔约一秒，然后手指收回合拢。
+双手保持在身前不超过肩膀宽度，动作结束时回到起始姿态。2D动画风格，cel-shaded，anime art style，保持与原图完全一致的卡通角色外观。
+"""
+speech_hint = "第一点是效率，第二点是质量，第三点是可持续性，这三点缺一不可。"
+
+[clips.emphasis]
+file = "emphasis.webm"
+tags = ["emphasis"]
+priority = 5
+prompt = """
+固定机位中景镜头，人物正面面向观众。右手从身前位置坚定地向下方做了一个下压动作，掌心朝下，强调关键信息，力度适中不夸张，然后手收回身前。
+双手保持在身前不超过肩膀宽度，动作结束时回到起始姿态。2D动画风格，cel-shaded，anime art style，保持与原图完全一致的卡通角色外观。
+"""
+speech_hint = "这一点非常关键，请大家务必记住，这是我们整个方案的核心所在。"
+
+[clips.example]
+file = "example.webm"
+tags = ["example"]
+priority = 6
+prompt = """
+固定机位中景镜头，人物正面面向观众。右手掌面向上摊开，手指自然伸展，向侧前方做了一个展示和举例的手势，像在呈现一个实物案例，然后收回。
+双手保持在身前不超过肩膀宽度，动作结束时回到起始姿态。2D动画风格，cel-shaded，anime art style，保持与原图完全一致的卡通角色外观。
+"""
+speech_hint = "比如说，我们可以看一个实际的案例，这个例子很好地说明了问题。"
+
+[clips.analysis]
+file = "analysis.webm"
+tags = ["analysis", "thinking"]
+priority = 7
+prompt = """
+固定机位中景镜头，人物正面面向观众。右手轻轻抬起，食指自然地靠近下巴做了一个思考和深度分析的姿态，眼睛保持看向前方，然后手放下回到身前。
+双手保持在身前不超过肩膀宽度，动作结束时回到起始姿态。2D动画风格，cel-shaded，anime art style，保持与原图完全一致的卡通角色外观。
+"""
+speech_hint = "深入分析这个问题，我们会发现背后还有更深层次的原因值得探讨。"
+
+[clips.comparison]
+file = "comparison.webm"
+tags = ["comparison"]
+priority = 8
+prompt = """
+固定机位中景镜头，人物正面面向观众。双手在身前同时抬起，掌心相对向上，像天平一样左右平衡摆动了一次，做了一个对比和权衡的手势，然后双手放下。
+双手保持在身前不超过肩膀宽度，动作结束时回到起始姿态。2D动画风格，cel-shaded，anime art style，保持与原图完全一致的卡通角色外观。
+"""
+speech_hint = "对比这两种方案，我们能看到各有优劣，需要根据实际情况权衡选择。"
+
+[clips.transition]
+file = "transition.webm"
+tags = ["transition"]
+priority = 9
+prompt = """
+固定机位中景镜头，人物正面面向观众。右手从身前向身体侧方做了一个平滑的引导手势，像在说"我们接着看下一个"，手势流畅自然，然后手收回身前。
+双手保持在身前不超过肩膀宽度，动作结束时回到起始姿态。2D动画风格，cel-shaded，anime art style，保持与原图完全一致的卡通角色外观。
+"""
+speech_hint = "好的，接下来让我们进入下一个话题，看看还有哪些重要的内容。"
+
+[clips.conclusion]
+file = "conclusion.webm"
+tags = ["conclusion"]
+priority = 10
+prompt = """
+固定机位中景镜头，人物正面面向观众。双手从身前位置缓慢地做了一个合拢和收回的动作，掌心相对靠拢，传达出总结和收束的意味，动作沉稳。
+双手保持在身前不超过肩膀宽度，动作结束时回到起始姿态。2D动画风格，cel-shaded，anime art style，保持与原图完全一致的卡通角色外观。
+"""
+speech_hint = "综上所述，我们今天讨论的所有内容都指向同一个核心方向。"
+
+[clips.thanks]
+file = "thanks.webm"
+tags = ["thanks"]
+priority = 11
+prompt = """
+固定机位中景镜头，人物正面面向观众。头部轻微向下点了一下，做了一个礼貌的致谢动作，双手在身前保持合拢，整体姿态恭敬而自然。
+双手保持在身前不超过肩膀宽度，动作结束时回到起始姿态。2D动画风格，cel-shaded，anime art style，保持与原图完全一致的卡通角色外观。
+"""
+speech_hint = "谢谢大家的聆听，如果有什么问题欢迎随时交流讨论。"
+
+# ---------------------------------------------------------------------------
+# 过渡规则：哪些切片可以跟随当前切片
+# "*" 表示可以跟随任何切片，也可以被任何切片跟随
+# ---------------------------------------------------------------------------
+[transitions]
+# neutral/filler 类：可以出现在任何位置
+neutral_tags = ["explaining", "example"]
+
+# 开场类：通常出现在场景开头
+opening_tags = ["greeting", "introduction"]
+
+# 主体类：场景核心内容
+body_tags = ["listing", "emphasis", "analysis", "comparison", "transition"]
+
+# 收尾类：通常出现在场景末尾
+closing_tags = ["conclusion", "thanks"]
+
+# 自然过渡序列建议（当标签序列需要扩展时使用）
+default_sequence = ["greeting", "introduction", "explaining", "emphasis", "example", "explaining", "conclusion", "thanks"]

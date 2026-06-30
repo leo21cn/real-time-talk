@@ -1,0 +1,38 @@
+{
+  "llm": {
+    "endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "api_key": "sk-6d5919bf09be409893953f91a24bffe7",
+    "model": "qwen-turbo",
+    "max_tokens": 2048
+  },
+  "tts": {
+    "api_key": "sk-6d5919bf09be409893953f91a24bffe7",
+    "voice": "Cherry",
+    "speed": 1.0
+  },
+  "avatar": {
+    "speaker": "short-hair-teacher-girl",
+    "clips_dir": "clips/short-hair-teacher-girl",
+    "idle_animation": "clips/short-hair-teacher-girl/idle/idle_breathing.webm"
+  },
+  "system_prompt": "",
+  "redis": {
+    "url": "redis://redis:6379/0",
+    "session_ttl_hours": 24
+  },
+  "minio": {
+    "endpoint": "minio:9000",
+    "access_key": "minioadmin",
+    "secret_key": "minioadmin",
+    "bucket": "realtimetalk",
+    "presigned_url_ttl_seconds": 600
+  },
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8000
+  },
+  "ffmpeg": {
+    "path": "ffmpeg",
+    "gpu_encoder": "auto"
+  }
+}

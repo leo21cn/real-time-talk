@@ -1,0 +1,18 @@
+# 临时/调试验证文件
+tmp/
+
+# Docker 运行时数据
+redis_data/
+minio_data/
+
+# 工作目录
+_work_*/
+_work/
+
+# Python
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+dist/
