@@ -95,7 +95,7 @@ export default function ChatPanel({ messages, onSend, disabled }: ChatPanelProps
         </div>
         <div>
           <div style={{ fontSize: 15, fontWeight: 600, color: '#333' }}>普兰</div>
-          <div style={{ fontSize: 12, color: '#999' }}>AI 助手</div>
+          <div style={{ fontSize: 12, color: '#999' }}>项目管理问询助理</div>
         </div>
       </div>
 

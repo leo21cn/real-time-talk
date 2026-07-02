@@ -4,6 +4,7 @@ Redis 操作封装
 import json
 import logging
 from typing import List, Optional
+from urllib.parse import urlparse
 
 import redis.asyncio as aioredis
 
@@ -30,9 +31,19 @@ class RedisClient:
     async def connect(self) -> bool:
         """建立 Redis 连接并验证可用性"""
         try:
-            self._client = aioredis.from_url(self.redis_url, decode_responses=True)
+            # 手动解析 URL 以正确处理密码中的特殊字符（如 !）
+            parsed = urlparse(self.redis_url)
+            self._client = aioredis.Redis(
+                host=parsed.hostname or "localhost",
+                port=parsed.port or 6379,
+                password=parsed.password,
+                username=parsed.username or None,
+                db=int((parsed.path or "/0").strip("/") or 0),
+                decode_responses=True,
+                protocol=2,
+            )
             await self._client.ping()
-            logger.info(f"Redis 连接成功: {self.redis_url}")
+            logger.info(f"Redis 连接成功: {parsed.hostname}:{parsed.port}")
             return True
         except Exception as e:
             logger.error(f"Redis 连接失败: {e}")

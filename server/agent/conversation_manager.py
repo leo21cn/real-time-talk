@@ -43,15 +43,19 @@ class ConversationManager:
         if redis_client:
             await redis_client.save_message(self.session_token, msg)
 
-    def get_messages_for_llm(self, max_tokens: int = 2048) -> List[dict]:
+    def get_messages_for_llm(self, max_tokens: int = 2048, rag_context: Optional[str] = None) -> List[dict]:
         """
         获取发送给 LLM 的完整 messages 列表。
-        包含 system prompt + 可能的摘要 + 对话历史。
+        包含 system prompt + RAG 上下文 + 可能的摘要 + 对话历史。
         """
         messages = []
 
         # System prompt
         messages.append({"role": "system", "content": self.system_prompt})
+
+        # RAG 上下文（在 system prompt 之后、对话历史之前）
+        if rag_context:
+            messages.append({"role": "system", "content": rag_context})
 
         # 如果有摘要，添加为 system 消息
         if self._summary:

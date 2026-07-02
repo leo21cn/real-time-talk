@@ -1,0 +1,73 @@
+# ============================================================
+# RealTimeTalk — Docker Swarm Stack 部署文件
+# ============================================================
+# 部署命令: docker stack deploy -c docker-stack.yml real-time-talk
+# 前置条件:
+#   1. 镜像 real-time-talk-predeploy:latest 已 docker load
+#   2. 外部网络 docker_default / qdrant-net / redis-net 已存在
+#   3. ECS 上 /root/real-time-talk/ 目录已包含 .env 和 config.json
+# ============================================================
+
+version: "3.8"
+
+services:
+  # ── MinIO 对象存储 ──────────────────────────────────────────
+  minio:
+    image: docker.m.daocloud.io/minio/minio:latest
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - default
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+
+  # ── FastAPI 服务端 ──────────────────────────────────────────
+  server:
+    image: real-time-talk-predeploy:latest
+    environment:
+      # 覆盖默认值，指向 Swarm 中的实际服务名
+      - REDIS_URL=redis://redis_redis:6379/0
+      - QDRANT_URL=http://qdrant_qdrant:6333
+      - MINIO_ENDPOINT=minio:9000
+    volumes:
+      # 配置文件（可从外部更新，无需重新构建镜像）
+      - /root/real-time-talk/config.json:/app/config.json:ro
+      # 环境变量（含 API Key 等敏感信息，不打包进镜像）
+      - /root/real-time-talk/.env:/app/.env:ro
+    networks:
+      - default              # 访问 minio
+      - docker_default       # 被 nginx-gateway 反向代理
+      - qdrant-net           # 访问 qdrant 向量数据库
+      - redis-net            # 访问 redis
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+
+# ── 网络 ──────────────────────────────────────────────────────
+networks:
+  default:
+    driver: overlay
+  docker_default:
+    external: true
+    name: docker_default
+  qdrant-net:
+    external: true
+    name: qdrant-net
+  redis-net:
+    external: true
+    name: redis-net
+
+# ── 数据卷 ────────────────────────────────────────────────────
+volumes:
+  minio_data:

@@ -7,16 +7,21 @@ from typing import Dict
 
 from fastapi import FastAPI, WebSocket, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 
 from server.config import get_config, reload_config
 from server.models.session import SessionContext
 from server.services.redis_client import RedisClient, RedisClientError
 from server.services.minio_client import MinioClient
 from server.services.llm_client import LlmClient
-from server.agent.agent_engine import AgentEngine
+from server.services.qdrant_client import QdrantClient, QdrantClientError
+from server.services.embedding_client import EmbeddingClient
+from server.agent.agent_engine import AgentEngine, set_rag_clients
 from server.api.routes_session import router as session_router, init_session_routes
 from server.api.routes_clips import router as clips_router
 from server.api.routes_media import router as media_router
+from server.api.routes_knowledge import router as knowledge_router, init_knowledge_routes
 from server.api.ws_handler import WsHandler
 
 # 日志配置
@@ -30,12 +35,14 @@ logger = logging.getLogger("main")
 sessions: Dict[str, SessionContext] = {}
 redis_client: RedisClient | None = None
 minio_client: MinioClient | None = None
+qdrant_client: QdrantClient | None = None
+embedding_client: EmbeddingClient | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    global redis_client, minio_client
+    global redis_client, minio_client, qdrant_client, embedding_client
 
     logger.info("RealTimeTalk 服务启动中...")
 
@@ -59,6 +66,25 @@ async def lifespan(app: FastAPI):
 
     # 初始化 Session 路由
     init_session_routes(sessions, redis_client)
+
+    # Qdrant 初始化
+    qdrant_client = QdrantClient()
+    try:
+        collections = await qdrant_client.list_collections()
+        logger.info(f"Qdrant 连接成功，现有 {len(collections)} 个集合: {collections}")
+    except QdrantClientError as e:
+        logger.warning(f"Qdrant 连接失败（服务仍可启动，RAG 功能暂不可用）: {e}")
+        collections = []
+
+    # Embedding 初始化
+    embedding_client = EmbeddingClient()
+    logger.info(f"Embedding 客户端已初始化: model={embedding_client.model}")
+
+    # 知识库路由初始化
+    init_knowledge_routes(qdrant_client, embedding_client)
+
+    # 注入 RAG 依赖到 AgentEngine
+    set_rag_clients(qdrant_client, embedding_client)
 
     logger.info("RealTimeTalk 服务已启动")
     yield
@@ -104,6 +130,7 @@ app.add_middleware(
 app.include_router(session_router)
 app.include_router(clips_router)
 app.include_router(media_router)
+app.include_router(knowledge_router)
 
 
 @app.get("/api/health")
@@ -129,7 +156,7 @@ async def websocket_endpoint(ws: WebSocket, token: str = Query(...)):
 
     # 创建处理器
     llm = LlmClient()
-    agent = AgentEngine(llm, redis_client)
+    agent = AgentEngine(llm, redis_client, qdrant_client, embedding_client)
 
     handler = WsHandler(
         sessions=sessions,
@@ -141,6 +168,15 @@ async def websocket_endpoint(ws: WebSocket, token: str = Query(...)):
 
     await ws.accept()
     await handler.handle(ws, token)
+
+
+# ── 前端静态文件（SPA 模式，404 回退到 index.html）──
+# 必须放在所有 API 路由和 WebSocket 端点之后，否则会拦截 API 请求
+static_dir = Path(__file__).resolve().parent.parent / "static"
+if static_dir.exists():
+    app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")
+else:
+    logger.warning(f"静态文件目录不存在: {static_dir}，跳过挂载")
 
 
 if __name__ == "__main__":

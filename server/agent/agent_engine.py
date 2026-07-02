@@ -1,15 +1,30 @@
 """
-Agent 引擎：纯对话 LLM 封装（不使用 function calling）
+Agent 引擎：纯对话 LLM 封装 + RAG 检索增强
 """
+import json as _json
 import logging
 import re
 from typing import Optional
 
 from server.agent.conversation_manager import ConversationManager
+from server.config import get_config
+from server.rag import build_rag_context
 from server.services.llm_client import LlmClient, LlmClientError
 from server.services.redis_client import RedisClient
 
 logger = logging.getLogger(__name__)
+
+
+# 需要注入的全局 RAG 客户端引用（由 main.py 在 lifespan 中设置）
+_qdrant_client = None
+_embedding_client = None
+
+
+def set_rag_clients(qdrant_client, embedding_client):
+    """由 main.py 调用，注入 RAG 依赖"""
+    global _qdrant_client, _embedding_client
+    _qdrant_client = qdrant_client
+    _embedding_client = embedding_client
 
 
 def strip_markdown(text: str) -> str:
@@ -48,9 +63,13 @@ class AgentEngine:
         self,
         llm_client: LlmClient,
         redis_client: RedisClient,
+        qdrant_client=None,
+        embedding_client=None,
     ):
         self.llm = llm_client
         self.redis = redis_client
+        self.qdrant = qdrant_client
+        self.embedding = embedding_client
 
     async def process_message(
         self,
@@ -77,6 +96,12 @@ class AgentEngine:
         # Step 3: 获取 messages
         messages = conversation.get_messages_for_llm()
 
+        # Step 3.5: RAG 检索
+        rag_context = await self._retrieve_rag_context(user_text)
+        if rag_context:
+            messages = conversation.get_messages_for_llm(rag_context=rag_context)
+            logger.info(f"RAG 上下文已注入: {len(rag_context)} 字符")
+
         # Step 4: 调用 LLM
         logger.info(f"发送 LLM 请求: {len(messages)} 条消息")
         try:
@@ -94,3 +119,62 @@ class AgentEngine:
 
         logger.info(f"LLM 回复: {reply[:100]}...")
         return reply
+
+    async def _retrieve_rag_context(self, query: str) -> Optional[str]:
+        """
+        从 Qdrant 检索与查询相关的知识，构建 RAG 上下文。
+
+        根据 role_collections 配置决定搜索范围：
+        - "*" → 搜索所有 collection
+        - ["col_a", "col_b"] → 仅搜索指定 collection
+        """
+        if not self.qdrant or not self.embedding:
+            logger.warning(f"RAG: 客户端未注入，跳过检索 (qdrant={self.qdrant is not None}, embedding={self.embedding is not None})")
+            return None
+
+        try:
+            # 获取角色-集合映射
+            cfg = get_config()
+            role_collections_raw = cfg["rag"]["role_collections"]
+            if isinstance(role_collections_raw, str):
+                role_collections = _json.loads(role_collections_raw)
+            else:
+                role_collections = role_collections_raw
+
+            # 确定要搜索的集合（当前角色固定为普兰）
+            role_cols = role_collections.get("普兰", "*")
+
+            if role_cols == "*":
+                collections = await self.qdrant.list_collections()
+                logger.info(f"RAG: 从 Qdrant 获取到 {len(collections)} 个集合: {collections}")
+                if not collections:
+                    logger.warning("RAG: 无可用集合，跳过检索")
+                    return None
+            elif isinstance(role_cols, list):
+                collections = role_cols
+            else:
+                collections = [role_cols]
+
+            # 嵌入查询
+            embeddings = await self.embedding.embed([query])
+            query_vector = embeddings[0]
+
+            # 语义检索
+            top_k = cfg["rag"]["top_k"]
+            results = await self.qdrant.search_multi(collections, query_vector, limit=top_k)
+
+            if not results:
+                logger.warning("RAG: 检索无结果")
+                return None
+
+            # 构建上下文
+            rag_context = build_rag_context(results)
+            logger.info(
+                f"RAG 检索完成: {len(collections)} 个集合, {len(results)} 条结果, "
+                f"top score={results[0]['score']:.3f}"
+            )
+            return rag_context if rag_context else None
+
+        except Exception as e:
+            logger.warning(f"RAG 检索失败，降级为纯 LLM 回复: {e}", exc_info=True)
+            return None

@@ -4,7 +4,7 @@ WebSocket 处理模块
 import asyncio
 import json
 import logging
-from typing import Dict
+from typing import Dict, Optional
 
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -12,9 +12,12 @@ from server.config import get_config
 from server.models.session import SessionContext, SessionState
 from server.agent.agent_engine import AgentEngine
 from server.agent.conversation_manager import ConversationManager
+from server.rag import build_rag_context
 from server.services.llm_client import LlmClient, LlmClientError
 from server.services.redis_client import RedisClient
 from server.services.minio_client import MinioClient
+from server.services.qdrant_client import QdrantClient
+from server.services.embedding_client import EmbeddingClient
 from server.pipeline.streaming_pipeline import StreamingPipeline
 from server.pipeline.segment_splitter import SegmentSplitter
 from server.pipeline.segment_generator import SegmentGenerator
@@ -202,8 +205,9 @@ class WsHandler:
             # Step 2: 检查 token 溢出
             await session_ctx.conversation.summarize_if_needed(self.llm)
 
-            # Step 3: 获取 messages
-            messages = session_ctx.conversation.get_messages_for_llm()
+            # Step 3: 获取 messages（含 RAG 检索）
+            rag_context = await self._retrieve_rag_context(user_text)
+            messages = session_ctx.conversation.get_messages_for_llm(rag_context=rag_context)
 
             logger.info(f"发送 LLM 流式请求: {len(messages)} 条消息")
 
@@ -334,6 +338,66 @@ class WsHandler:
         except Exception as e:
             logger.error(f"流式处理异常: {e}")
             await self._reset_and_error(ws, session_ctx, "抱歉，出了点问题，请稍后重试")
+
+    async def _retrieve_rag_context(self, query: str) -> Optional[str]:
+        """
+        从 Qdrant 检索与查询相关的知识，构建 RAG 上下文。
+        """
+        import json as _json
+
+        # 检查 RAG 客户端是否可用
+        has_qdrant = hasattr(self.agent, 'qdrant') and self.agent.qdrant is not None
+        has_embedding = hasattr(self.agent, 'embedding') and self.agent.embedding is not None
+        if not has_qdrant or not has_embedding:
+            logger.warning(
+                f"RAG 跳过: qdrant={has_qdrant}, embedding={has_embedding}, "
+                f"agent_attrs={[a for a in dir(self.agent) if not a.startswith('_')]}"
+            )
+            return None
+
+        try:
+            role_collections_raw = self.cfg["rag"]["role_collections"]
+            if isinstance(role_collections_raw, str):
+                role_collections = _json.loads(role_collections_raw)
+            else:
+                role_collections = role_collections_raw
+
+            role_cols = role_collections.get("普兰", "*")
+            logger.info(f"RAG: role_cols={role_cols}, raw={role_collections_raw}")
+
+            if role_cols == "*":
+                collections = await self.agent.qdrant.list_collections()
+                logger.info(f"RAG: 从 Qdrant 获取到 {len(collections)} 个集合: {collections}")
+                if not collections:
+                    logger.warning("RAG 跳过: 无可用集合")
+                    return None
+            elif isinstance(role_cols, list):
+                collections = role_cols
+            else:
+                collections = [role_cols]
+
+            embeddings = await self.agent.embedding.embed([query])
+            query_vector = embeddings[0]
+            logger.info(f"RAG: 查询嵌入完成, 向量维度={len(query_vector)}")
+
+            top_k = self.cfg["rag"]["top_k"]
+            results = await self.agent.qdrant.search_multi(collections, query_vector, limit=top_k)
+            logger.info(f"RAG: 检索返回 {len(results)} 条结果")
+
+            if not results:
+                logger.warning("RAG 跳过: 检索无结果")
+                return None
+
+            rag_context = build_rag_context(results)
+            logger.info(
+                f"RAG 检索完成: {len(collections)} 个集合, {len(results)} 条结果, "
+                f"top score={results[0]['score']:.3f}"
+            )
+            return rag_context if rag_context else None
+
+        except Exception as e:
+            logger.warning(f"RAG 检索失败，降级为纯 LLM 回复: {e}", exc_info=True)
+            return None
 
     async def _send_error(self, ws: WebSocket, message: str, pipeline: StreamingPipeline):
         """推送错误并清理 pipeline"""

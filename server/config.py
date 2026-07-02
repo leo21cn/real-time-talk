@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
+import json as _json
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -54,6 +55,21 @@ class FfmpegConfig(BaseModel):
     gpu_encoder: Optional[str] = "auto"
 
 
+class QdrantConfig(BaseModel):
+    url: str = "http://localhost:6333"
+
+
+class EmbeddingConfig(BaseModel):
+    endpoint: str = "https://api.openai.com/v1"
+    api_key: str = ""
+    model: str = "text-embedding-v3"
+
+
+class RagConfig(BaseModel):
+    top_k: int = 5
+    role_collections: str = '{"普兰": "pulan_default"}'
+
+
 class AppConfig(BaseSettings):
     """应用配置（支持环境变量覆盖）"""
     model_config = SettingsConfigDict(
@@ -91,6 +107,22 @@ class AppConfig(BaseSettings):
     # FFmpeg 配置
     ffmpeg_path: str = Field(default="ffmpeg", alias="FFMPEG_PATH")
     ffmpeg_gpu_encoder: Optional[str] = Field(default="auto", alias="FFMPEG_GPU_ENCODER")
+
+    # Qdrant 配置
+    qdrant_url: str = Field(default="http://localhost:6333", alias="QDRANT_URL")
+    qdrant_api_key: str = Field(default="", alias="QDRANT_API_KEY")
+
+    # Embedding 配置
+    embedding_endpoint: str = Field(default="https://api.openai.com/v1", alias="EMBEDDING_ENDPOINT")
+    embedding_api_key: str = Field(default="", alias="DASHSCOPE_API_KEY")
+    embedding_model: str = Field(default="text-embedding-v3", alias="EMBEDDING_MODEL")
+
+    # RAG 配置
+    rag_top_k: int = Field(default=5, alias="RAG_TOP_K")
+    rag_role_collections: str = Field(default='{"普兰": "pulan_default"}', alias="ROLE_COLLECTIONS")
+
+    # 知识管理 Admin Token（空则跳过鉴权）
+    knowledge_admin_token: str = Field(default="", alias="KNOWLEDGE_ADMIN_TOKEN")
 
 
 def _load_json_config() -> dict:
@@ -190,6 +222,20 @@ def load_config() -> dict:
             "path": _get(["ffmpeg", "path"], json_cfg, env_settings.ffmpeg_path, "ffmpeg"),
             "gpu_encoder": _get(["ffmpeg", "gpu_encoder"], json_cfg, env_settings.ffmpeg_gpu_encoder, "auto"),
         },
+        "qdrant": {
+            "url": _get(["qdrant", "url"], json_cfg, env_settings.qdrant_url, "http://localhost:6333"),
+            "api_key": _get(["qdrant", "api_key"], json_cfg, env_settings.qdrant_api_key, ""),
+        },
+        "embedding": {
+            "endpoint": _get(["embedding", "endpoint"], json_cfg, env_settings.embedding_endpoint, "https://api.openai.com/v1"),
+            "api_key": _get(["embedding", "api_key"], json_cfg, env_settings.embedding_api_key, ""),
+            "model": _get(["embedding", "model"], json_cfg, env_settings.embedding_model, "text-embedding-v3"),
+        },
+        "rag": {
+            "top_k": int(_get(["rag", "top_k"], json_cfg, env_settings.rag_top_k, 5)),
+            "role_collections": _get(["rag", "role_collections"], json_cfg, env_settings.rag_role_collections, '{"普兰": "pulan_default"}'),
+        },
+        "knowledge_admin_token": env_settings.knowledge_admin_token or "",
     }
 
     return config

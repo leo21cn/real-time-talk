@@ -313,53 +313,11 @@ export default function App() {
         {appState}
       </div>
 
-      {/* Markdown 气泡样式 */}
+      {/* 气泡样式 */}
       <style>{`
-        .chat-markdown h3 {
-          margin: 8px 0 4px;
-          font-size: 15px;
-          font-weight: 600;
-          color: #1a1a1a;
-        }
-        .chat-markdown h3:first-child {
-          margin-top: 0;
-        }
-        .chat-markdown p {
-          margin: 4px 0;
-        }
-        .chat-markdown p:last-child {
-          margin-bottom: 0;
-        }
-        .chat-markdown ul, .chat-markdown ol {
-          margin: 4px 0;
-          padding-left: 20px;
-        }
-        .chat-markdown li {
-          margin: 2px 0;
-        }
-        .chat-markdown strong {
-          color: #1a1a1a;
-          font-weight: 600;
-        }
-        .chat-markdown code {
-          background: #f0f0f0;
-          padding: 1px 5px;
-          border-radius: 3px;
-          font-size: 13px;
-          font-family: 'SF Mono', 'Fira Code', monospace;
-          word-break: break-all;
-        }
-        .chat-markdown blockquote {
-          margin: 6px 0;
-          padding: 4px 10px;
-          border-left: 3px solid #1890FF;
-          background: #f6f9ff;
-          color: #555;
-        }
-        .chat-markdown hr {
-          border: none;
-          border-top: 1px solid #e8e8e8;
-          margin: 8px 0;
+        @keyframes typingBounce {
+          from { opacity: 0.3; transform: translateY(0); }
+          to { opacity: 1; transform: translateY(-4px); }
         }
       `}</style>
     </div>

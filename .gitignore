@@ -1,6 +1,9 @@
 # 临时/调试验证文件
 tmp/
 
+# 部署中间产物
+deploy/
+
 # Docker 运行时数据
 redis_data/
 minio_data/
@@ -12,6 +15,9 @@ _work/
 # Python
 __pycache__/
 *.pyc
+
+# Docker 镜像导出文件
+image.tar
 
 # Node
 node_modules/

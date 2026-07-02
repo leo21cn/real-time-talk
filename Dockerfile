@@ -12,6 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt -i https://mirrors.aliyun.com
 
 COPY server/ ./server/
 COPY clips/ ./clips/
+COPY client/dist/ ./static/
 
 RUN mkdir -p _work
 
