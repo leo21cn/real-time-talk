@@ -1,0 +1,16 @@
+schema_version: 1
+module_path: build_system
+title: 构建与部署体系（Docker + Vite + Shell 脚本）
+scope: []
+source_files:
+    - Dockerfile
+    - docker-compose.yml
+    - docker-stack.yml
+    - client/package.json
+    - client/vite.config.ts
+    - server/requirements.txt
+    - deploy/test_suite.sh
+    - deploy/compress.ps1
+    - deploy/config/docker-stack.yml
+depends_on: []
+related_to: []

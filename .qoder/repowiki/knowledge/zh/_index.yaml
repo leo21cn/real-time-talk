@@ -1,0 +1,445 @@
+# 知识卡导出索引文件
+schema_version: 1
+locale: zh-CN
+branch: main
+nodes_managed: true
+exported_at: "2026-07-02T07:19:08Z"
+modules:
+    "":
+        dir_name: RealTimeTalk 实时数字人对话系统
+        title: RealTimeTalk 实时数字人对话系统
+        scope:
+            - .gitignore
+            - config.json
+            - Dockerfile
+            - docker-compose.yml
+            - docker-stack.yml
+            - nginx-pulan.conf
+            - nginx.conf
+            - .env
+            - .env.example
+            - .env.production
+            - .qoder\specs\RAG知识库Qdrant集成_task-10b.md
+            - _check_idle\check_all_clips.py
+            - _check_idle\check_all_clips2.py
+            - _check_idle\check_clips_imageio.py
+            - _check_idle\clips_check\analysis_first.png
+            - _check_idle\clips_check\analysis_last.png
+            - _check_idle\clips_check\comparison_first.png
+            - _check_idle\clips_check\comparison_last.png
+            - _check_idle\clips_check\conclusion_first.png
+            - _check_idle\clips_check\conclusion_last.png
+            - _check_idle\clips_check\emphasis_first.png
+            - _check_idle\clips_check\emphasis_last.png
+            - _check_idle\clips_check\example_first.png
+            - _check_idle\clips_check\example_last.png
+            - _check_idle\clips_check\explaining_first.png
+            - _check_idle\clips_check\explaining_last.png
+            - _check_idle\clips_check\greeting_first.png
+            - _check_idle\clips_check\greeting_last.png
+            - _check_idle\clips_check\idle_breathing_first.png
+            - _check_idle\clips_check\idle_breathing_last.png
+            - _check_idle\clips_check\introduction_first.png
+            - _check_idle\clips_check\introduction_last.png
+            - _check_idle\clips_check\listing_first.png
+            - _check_idle\clips_check\listing_last.png
+            - _check_idle\clips_check\thanks_first.png
+            - _check_idle\clips_check\thanks_last.png
+            - _check_idle\clips_check\transition_first.png
+            - _check_idle\clips_check\transition_last.png
+            - _check_idle\comparison.png
+            - _check_idle\extract_frames.ps1
+            - _check_idle\find_loop.py
+            - _check_idle\first_frame.png
+            - _check_idle\frame124.png
+            - _check_idle\frame125.png
+            - _check_idle\frame_101.png
+            - _check_idle\frame_103.png
+            - _check_idle\frame_105.png
+            - _check_idle\frame_107.png
+            - _check_idle\frame_109.png
+            - _check_idle\frame_111.png
+            - _check_idle\frame_113.png
+            - _check_idle\frame_115.png
+            - _check_idle\frame_117.png
+            - _check_idle\frame_119.png
+            - _check_idle\frame_121.png
+            - _check_idle\frame_123.png
+            - _check_idle\frame_125.png
+            - _check_idle\frame_5.04.png
+            - _check_idle\frame_at_0.5s.png
+            - _check_idle\frame_at_1.0s.png
+            - _check_idle\frame_at_1.5s.png
+            - _check_idle\frame_at_2.0s.png
+            - _check_idle\frame_at_2.5s.png
+            - _check_idle\frame_at_3.0s.png
+            - _check_idle\frame_at_3.5s.png
+            - _check_idle\frame_at_4.0s.png
+            - _check_idle\frame_at_4.5s.png
+            - _check_idle\frame_at_5.0s.png
+            - _check_idle\last_frame.png
+            - _check_idle\tmp\cv_first.png
+            - _check_idle\tmp\cv_last.png
+            - _check_idle\tmp\fixed_first.png
+            - _check_idle\tmp\fixed_last.png
+            - _work_analysis_regen\analysis_raw.mp4
+            - _work_clips_regen\comparison_raw.mp4
+            - _work_clips_regen\conclusion_raw.mp4
+            - _work_clips_regen\emphasis_raw.mp4
+            - _work_clips_regen\example_raw.mp4
+            - _work_clips_regen\explaining_raw.mp4
+            - _work_clips_regen\greeting_raw.mp4
+            - _work_clips_regen\introduction_raw.mp4
+            - _work_clips_regen\listing_raw.mp4
+            - _work_clips_regen\thanks_raw.mp4
+            - _work_clips_regen\transition_raw.mp4
+            - _work_idle_regen\idle_raw.mp4
+            - client\admin.html
+            - client\index.html
+            - client\package-lock.json
+            - client\package.json
+            - client\src\App.tsx
+            - client\src\admin.tsx
+            - client\src\components\AdminPage.tsx
+            - client\src\components\AvatarView.tsx
+            - client\src\components\ChatBubble.tsx
+            - client\src\components\ChatPanel.tsx
+            - client\src\components\ErrorBubble.tsx
+            - client\src\components\InputBox.tsx
+            - client\src\components\KnowledgePanel.tsx
+            - client\src\components\SpeechBubble.tsx
+            - client\src\hooks\useTypewriter.ts
+            - client\src\hooks\useWebSocket.ts
+            - client\src\main.tsx
+            - client\src\services\api.ts
+            - client\src\types\chat.ts
+            - client\src\types\events.ts
+            - client\src\vite-env.d.ts
+            - client\tsconfig.json
+            - client\vite.config.ts
+            - clips\short-hair-teacher-girl\.webm\.gitignore
+            - clips\short-hair-teacher-girl\.webm\analysis.webm
+            - clips\short-hair-teacher-girl\.webm\comparison.webm
+            - clips\short-hair-teacher-girl\.webm\conclusion.webm
+            - clips\short-hair-teacher-girl\.webm\emphasis.webm
+            - clips\short-hair-teacher-girl\.webm\example.webm
+            - clips\short-hair-teacher-girl\.webm\explaining.webm
+            - clips\short-hair-teacher-girl\.webm\greeting.webm
+            - clips\short-hair-teacher-girl\.webm\introduction.webm
+            - clips\short-hair-teacher-girl\.webm\listing.webm
+            - clips\short-hair-teacher-girl\.webm\thanks.webm
+            - clips\short-hair-teacher-girl\.webm\transition.webm
+            - clips\short-hair-teacher-girl\analysis.mkv
+            - clips\short-hair-teacher-girl\clips.toml
+            - clips\short-hair-teacher-girl\comparison.mkv
+            - clips\short-hair-teacher-girl\conclusion.mkv
+            - clips\short-hair-teacher-girl\emphasis.mkv
+            - clips\short-hair-teacher-girl\example.mkv
+            - clips\short-hair-teacher-girl\explaining.mkv
+            - clips\short-hair-teacher-girl\greeting.mkv
+            - clips\short-hair-teacher-girl\idle\idle_breathing.webm
+            - clips\short-hair-teacher-girl\idle\idle_breathing.webm.bak
+            - clips\short-hair-teacher-girl\idle\idle_breathing.webm.bak2
+            - clips\short-hair-teacher-girl\introduction.mkv
+            - clips\short-hair-teacher-girl\listing.mkv
+            - clips\short-hair-teacher-girl\thanks.mkv
+            - clips\short-hair-teacher-girl\transition.mkv
+            - deploy\121.199.53.233_20260701_112153\real-time-talk-predeploy.tar
+            - deploy\121.199.53.233_20260701_125653\real-time-talk-predeploy.tar
+            - deploy\121.199.53.233_20260701_125653\real-time-talk-predeploy.tar.gz
+            - deploy\check_container.py
+            - deploy\check_prompt.py
+            - deploy\check_routes.py
+            - deploy\compress.ps1
+            - deploy\config\.env
+            - deploy\config\config.json
+            - deploy\config\docker-stack.yml
+            - deploy\config\nginx-pulan.conf
+            - deploy\fix_admin_js.py
+            - deploy\fix_nginx_host.py
+            - deploy\fix_nginx_https.py
+            - deploy\fix_role_collections.py
+            - deploy\master_test.sh
+            - deploy\real-time-talk-server-new.tar.gz
+            - deploy\setup_ssl_pulan.py
+            - deploy\sync_prompt.py
+            - deploy\test\test-spec.md
+            - deploy\test_e2e_rag.py
+            - deploy\test_kb.sh
+            - deploy\test_phase4b.sh
+            - deploy\test_phase7.sh
+            - deploy\test_search.sh
+            - deploy\test_suite.sh
+            - deploy\test_ws.py
+            - deploy\update_static.py
+            - dist-update.tar.gz
+            - doc\Qdrant知识库操作指南.md
+            - doc\deploy-manual.md
+            - doc\req-raw.md
+            - doc\req-spec.md
+            - doc\tech-spec.md
+            - doc\test-spec.md
+            - image.tar
+            - server\__init__.py
+            - server\agent\__init__.py
+            - server\agent\agent_engine.py
+            - server\agent\conversation_manager.py
+            - server\api\__init__.py
+            - server\api\routes_clips.py
+            - server\api\routes_knowledge.py
+            - server\api\routes_media.py
+            - server\api\routes_session.py
+            - server\api\ws_handler.py
+            - server\config.py
+            - server\main.py
+            - server\models\__init__.py
+            - server\models\message.py
+            - server\models\semantic_label.py
+            - server\models\session.py
+            - server\pipeline\__init__.py
+            - server\pipeline\segment_generator.py
+            - server\pipeline\segment_splitter.py
+            - server\pipeline\streaming_pipeline.py
+            - server\rag\__init__.py
+            - server\requirements.txt
+            - server\resources\default_system_prompt.txt
+            - server\services\__init__.py
+            - server\services\embedding_client.py
+            - server\services\llm_client.py
+            - server\services\minio_client.py
+            - server\services\qdrant_client.py
+            - server\services\redis_client.py
+            - server\services\semantic_analyzer.py
+            - server\services\tts_engine.py
+            - server\services\video_concat.py
+            - tmp\_verify_final_idle.png
+            - tmp\_verify_final_v6_idle.png
+            - tmp\_verify_idle.png
+            - tmp\_verify_new_clips.png
+            - tmp\_verify_speaking.png
+            - tmp\_verify_thinking.png
+            - tmp\_verify_v6_idle.png
+            - tmp\_verify_v6_speaking.png
+            - tmp\analysis_frame.png
+            - tmp\analysis_rgba.png
+            - tmp\check_bubble.py
+            - tmp\check_bubble2.py
+            - tmp\clean_temp.ps1
+            - tmp\convert_clips.py
+            - tmp\final_idle.png
+            - tmp\fix_clips_frames.py
+            - tmp\fix_idle_color.py
+            - tmp\frame_001.png
+            - tmp\frame_003.png
+            - tmp\frame_005.png
+            - tmp\greeting_frame.png
+            - tmp\idle_frame.png
+            - tmp\idle_rgba.png
+            - tmp\mkv_rgba.png
+            - tmp\new_analysis.png
+            - tmp\new_greeting.png
+            - tmp\new_idle.png
+            - tmp\regen_all_semantic_clips.py
+            - tmp\regen_analysis.py
+            - tmp\regen_idle.py
+            - tmp\screenshot_admin_collection_check.png
+            - tmp\screenshot_admin_collection_dropdown.png
+            - tmp\screenshot_admin_login.png
+            - tmp\screenshot_after_enter.png
+            - tmp\screenshot_current_state.png
+            - tmp\screenshot_final_idle.png
+            - tmp\screenshot_final_result.png
+            - tmp\screenshot_idle.png
+            - tmp\screenshot_initial.png
+            - tmp\screenshot_input_ready.png
+            - tmp\screenshot_localhost.png
+            - tmp\screenshot_phase_a_thinking.png
+            - tmp\screenshot_phase_b_speaking.png
+            - tmp\screenshot_phase_c_completion.png
+            - tmp\screenshot_pulan_title.png
+            - tmp\screenshot_result.png
+            - tmp\screenshot_speaking.png
+            - tmp\screenshot_speaking_segment0.png
+            - tmp\screenshot_speaking_segment10.png
+            - tmp\screenshot_speaking_segment3.png
+            - tmp\screenshot_speaking_segment6.png
+            - tmp\screenshot_stuck_bridging.png
+            - tmp\screenshot_test_1_bridging.png
+            - tmp\screenshot_test_1_initial.png
+            - tmp\screenshot_test_1_input_ready.png
+            - tmp\screenshot_test_1_phase2_speaking.png
+            - tmp\screenshot_test_1_phase3_idle.png
+            - tmp\screenshot_test_1_phase3_idle_2.png
+            - tmp\screenshot_test_bridging.png
+            - tmp\screenshot_test_issue1_idle_initial.png
+            - tmp\screenshot_test_issue2_thinking.png
+            - tmp\screenshot_test_issue3_speaking.png
+            - tmp\screenshot_test_issue4_idle_final.png
+            - tmp\screenshot_thinking_analysis.png
+            - tmp\test_alpha_frame.png
+            - tmp\test_qdrant.py
+            - tmp\test_rag.py
+            - tmp\test_search.py
+            - tmp\test_strip.py
+            - tmp\verify_1_idle_initial.png
+            - tmp\verify_admin.py
+            - tmp_fix_frames\canonical_clip.png
+            - tmp_fix_frames\canonical_raw.png
+            - tmp_fix_frames\verify\analysis_first.png
+            - tmp_fix_frames\verify\analysis_last.png
+            - tmp_fix_frames\verify\comparison_first.png
+            - tmp_fix_frames\verify\comparison_last.png
+            - tmp_fix_frames\verify\conclusion_first.png
+            - tmp_fix_frames\verify\conclusion_last.png
+            - tmp_fix_frames\verify\emphasis_first.png
+            - tmp_fix_frames\verify\emphasis_last.png
+            - tmp_fix_frames\verify\example_first.png
+            - tmp_fix_frames\verify\example_last.png
+            - tmp_fix_frames\verify\explaining_first.png
+            - tmp_fix_frames\verify\explaining_last.png
+            - tmp_fix_frames\verify\greeting_first.png
+            - tmp_fix_frames\verify\greeting_last.png
+            - tmp_fix_frames\verify\idle_first.png
+            - tmp_fix_frames\verify\idle_last.png
+            - tmp_fix_frames\verify\introduction_first.png
+            - tmp_fix_frames\verify\introduction_last.png
+            - tmp_fix_frames\verify\listing_first.png
+            - tmp_fix_frames\verify\listing_last.png
+            - tmp_fix_frames\verify\thanks_first.png
+            - tmp_fix_frames\verify\thanks_last.png
+            - tmp_fix_frames\verify\transition_first.png
+            - tmp_fix_frames\verify\transition_last.png
+        source_files: []
+        children:
+            - client
+            - docs
+            - server
+        depends_on: []
+        related_to: []
+    build_system:
+        dir_name: 构建与部署体系（Docker + Vite + Shell 脚本）
+        title: 构建与部署体系（Docker + Vite + Shell 脚本）
+        scope: []
+        source_files:
+            - Dockerfile
+            - docker-compose.yml
+            - docker-stack.yml
+            - client/package.json
+            - client/vite.config.ts
+            - server/requirements.txt
+            - deploy/test_suite.sh
+            - deploy/compress.ps1
+            - deploy/config/docker-stack.yml
+        children: []
+        depends_on: []
+        related_to: []
+    client:
+        dir_name: 实时对话前端（React + Vite）
+        title: 实时对话前端（React + Vite）
+        scope:
+            - client/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: server
+    configuration_system:
+        dir_name: 配置系统：pydantic-settings + JSON 双源合并与环境变量覆盖
+        title: 配置系统：pydantic-settings + JSON 双源合并与环境变量覆盖
+        scope: []
+        source_files:
+            - server/config.py
+            - config.json
+            - .env.example
+            - .env.production
+            - deploy/config/.env
+            - server/main.py
+            - clips/short-hair-teacher-girl/clips.toml
+        children: []
+        depends_on: []
+        related_to: []
+    dependency_management:
+        dir_name: Python_Node.js 双栈依赖管理
+        title: Python/Node.js 双栈依赖管理
+        scope: []
+        source_files:
+            - server/requirements.txt
+            - client/package.json
+            - client/package-lock.json
+            - Dockerfile
+        children: []
+        depends_on: []
+        related_to: []
+    docs:
+        dir_name: 项目文档与部署手册
+        title: 项目文档与部署手册
+        scope:
+            - doc/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: server/app_entrypoint
+    error_handling:
+        dir_name: 错误处理体系：领域异常 + FastAPI HTTPException + WebSocket 事件化错误
+        title: 错误处理体系：领域异常 + FastAPI HTTPException + WebSocket 事件化错误
+        scope: []
+        source_files:
+            - server/services/llm_client.py
+            - server/services/minio_client.py
+            - server/api/ws_handler.py
+            - server/api/routes_knowledge.py
+            - server/api/routes_clips.py
+        children: []
+        depends_on: []
+        related_to: []
+    frontend_style:
+        dir_name: 内联样式驱动的轻量级前端风格体系
+        title: 内联样式驱动的轻量级前端风格体系
+        scope: []
+        source_files:
+            - client/src/App.tsx
+            - client/src/components/AdminPage.tsx
+            - client/src/components/ChatPanel.tsx
+            - client/src/components/ChatBubble.tsx
+            - client/src/components/SpeechBubble.tsx
+            - client/src/components/ErrorBubble.tsx
+            - client/src/components/InputBox.tsx
+            - client/src/components/AvatarView.tsx
+            - client/src/components/KnowledgePanel.tsx
+            - client/package.json
+        children: []
+        depends_on: []
+        related_to: []
+    logging_system:
+        dir_name: Python 标准库 logging 日志系统
+        title: Python 标准库 logging 日志系统
+        scope: []
+        source_files:
+            - server/main.py
+        children: []
+        depends_on: []
+        related_to: []
+    server:
+        dir_name: RealTimeTalk 实时对话服务
+        title: RealTimeTalk 实时对话服务
+        scope:
+            - server/
+        source_files: []
+        children:
+            - server/app_entrypoint
+        depends_on: []
+        related_to:
+            - path: client
+    server/app_entrypoint:
+        dir_name: FastAPI 应用入口与配置加载
+        title: FastAPI 应用入口与配置加载
+        scope:
+            - server/main.py
+            - server/config.py
+            - server/requirements.txt
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: docs

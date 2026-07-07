@@ -1,0 +1,9 @@
+schema_version: 1
+module_path: docs
+title: 项目文档与部署手册
+scope:
+    - doc/
+source_files: []
+depends_on: []
+related_to:
+    - path: server/app_entrypoint

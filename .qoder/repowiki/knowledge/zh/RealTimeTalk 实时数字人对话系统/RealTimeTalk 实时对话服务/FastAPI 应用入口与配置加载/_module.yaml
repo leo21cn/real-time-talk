@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: server/app_entrypoint
+title: FastAPI 应用入口与配置加载
+scope:
+    - server/main.py
+    - server/config.py
+    - server/requirements.txt
+source_files: []
+depends_on: []
+related_to:
+    - path: docs
