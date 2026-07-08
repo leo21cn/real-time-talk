@@ -6,6 +6,7 @@
  */
 import { useRef, useEffect, useCallback } from 'react';
 import ChatBubble from './ChatBubble';
+import VoiceInputButton from './VoiceInputButton';
 import type { ChatMessage } from '../types/chat';
 
 interface ChatPanelProps {
@@ -34,6 +35,32 @@ export default function ChatPanel({ messages, onSend, disabled }: ChatPanelProps
       inputRef.current.style.height = 'auto';
     }
   }, [onSend, disabled]);
+
+  /**
+   * 语音转写完成：追加模式写入 textarea 并触发自动撑高。
+   * - 输入框为空：直接填入
+   * - 输入框已有内容：在末尾追加换行 + 新文本，避免覆盖用户手动输入部分
+   */
+  const handleTranscribed = useCallback((text: string) => {
+    const el = inputRef.current;
+    if (!el) return;
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const existing = el.value.replace(/\s+$/, ''); // 去掉原文本末尾空白
+    el.value = existing ? `${existing}\n${trimmed}` : trimmed;
+    // 触发撑高
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+    // 滚到底部 + focus
+    el.focus();
+    // 光标移到末尾
+    const len = el.value.length;
+    try {
+      el.setSelectionRange(len, len);
+    } catch {
+      // 某些浏览器在 readonly/disabled 状态下会抛错，忽略即可
+    }
+  }, []);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -167,6 +194,10 @@ export default function ChatPanel({ messages, onSend, disabled }: ChatPanelProps
             background: disabled ? '#f5f5f5' : '#FFFFFF',
             maxHeight: 120,
           }}
+        />
+        <VoiceInputButton
+          onTranscribed={handleTranscribed}
+          disabled={disabled}
         />
         <button
           onClick={handleSend}

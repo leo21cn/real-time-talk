@@ -1,0 +1,22 @@
+# 临时镜像：仅用于在 Linux 容器内构建前端
+FROM docker.m.daocloud.io/library/node:20-alpine
+
+WORKDIR /app
+
+# 安装依赖
+COPY package*.json ./
+RUN npm install --no-audit --no-fund
+
+# 复制源码
+COPY tsconfig.json ./
+COPY vite.config.ts ./
+COPY index.html ./
+COPY admin.html ./
+COPY src ./src
+
+# 构建
+RUN npm run build
+
+# 默认工作目录已是 /app，build 产物在 /app/dist
+# docker run 时通过 -v 挂载 host 的 dist 目录即可导出
+CMD ["sh", "-c", "echo 'Build complete. Copy /app/dist to host via -v mount.'"]

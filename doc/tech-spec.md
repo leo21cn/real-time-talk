@@ -499,6 +499,49 @@ class VideoClipConcat:
 
 **说明**：运行时拼接采用 stream copy（流拷贝），视频不经过重编码，大幅降低延迟。切片已在预转换阶段（`convert_clips.py`）转码为统一的 WebM VP9 Alpha 格式。时长对齐仅通过末尾切片循环填充，不使用变速滤镜。
 
+### 3.11 ASR 语音识别模块（v2.1）
+
+客户端语音输入 → 文字，服务端调用 DashScope `qwen3-asr-flash` 转写。
+
+#### 3.11.1 交互数据流
+
+```
+[浏览器]                              [FastAPI Server]                   [DashScope]
+   │                                        │                                │
+   │ 1. mousedown → getUserMedia + MediaRecorder.start                       │
+   │ 2. AnalyserNode → 实时音量 + 倒计时                                     │
+   │ 3. mouseup → recorder.stop() → Blob(base64)                             │
+   │ 4. POST /api/asr/transcribe ─────────────────> │ 5. POST chat/completions ──────>│
+   │    {audio: "...", format: "webm"}          │    model: qwen3-asr-flash         │
+   │                                              │    input_audio.data = base64     │
+   │                                              │                                │
+   │                                              │<── {content: "转写结果"}  ─────│
+   │<─ 6. {text: "..."}  ────────────────────   │                                │
+   │ 7. 填入 ChatPanel textarea（不自动发送）     │                                │
+```
+
+#### 3.11.2 REST 接口
+
+```
+POST /api/asr/transcribe
+Request:  { "audio": "<base64>", "format": "webm|mp4|wav|ogg", "language": "zh" }
+Response: { "text": "转写结果", "duration_ms": 1234 }
+
+错误码：
+  400 - audio 为空 / 格式不支持 / API Key 未配置
+  502 - DashScope 调用失败 / 鉴权失败
+  504 - 调用超时
+```
+
+#### 3.11.3 实现要点
+
+- 服务端懒加载 `AsrEngine`（复用 `httpx.AsyncClient`）
+- API Key 复用 `DASHSCOPE_API_KEY`（与 TTS/LLM 同号）
+- 重试 1 次（限流 / 服务端错误 / 超时）
+- 客户端使用浏览器原生 `MediaRecorder`，无额外依赖
+- 音频传输：客户端 base64 → HTTP 请求体（60s 上限下可控）
+- 取消仅支持 ESC 键（不提供上滑取消手势）
+
 ### 3.10 配置模块
 
 #### 3.10.1 配置加载优先级

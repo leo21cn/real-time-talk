@@ -34,5 +34,12 @@
   "ffmpeg": {
     "path": "ffmpeg",
     "gpu_encoder": "auto"
+  },
+  "asr": {
+    "endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "api_key": "",
+    "model": "qwen3-asr-flash",
+    "timeout": 30,
+    "max_audio_seconds": 60
   }
 }

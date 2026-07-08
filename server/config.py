@@ -70,6 +70,15 @@ class RagConfig(BaseModel):
     role_collections: str = '{"普兰": "pulan_default"}'
 
 
+class AsrConfig(BaseModel):
+    """语音识别（ASR）配置，复用 DASHSCOPE_API_KEY"""
+    endpoint: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    api_key: str = ""
+    model: str = "qwen3-asr-flash"
+    timeout: int = 30
+    max_audio_seconds: int = 60
+
+
 class AppConfig(BaseSettings):
     """应用配置（支持环境变量覆盖）"""
     model_config = SettingsConfigDict(
@@ -120,6 +129,13 @@ class AppConfig(BaseSettings):
     # RAG 配置
     rag_top_k: int = Field(default=5, alias="RAG_TOP_K")
     rag_role_collections: str = Field(default='{"普兰": "pulan_default"}', alias="ROLE_COLLECTIONS")
+
+    # ASR 配置（API Key 复用 DASHSCOPE_API_KEY）
+    asr_endpoint: str = Field(default="https://dashscope.aliyuncs.com/compatible-mode/v1", alias="ASR_ENDPOINT")
+    asr_api_key: str = Field(default="", alias="DASHSCOPE_API_KEY")
+    asr_model: str = Field(default="qwen3-asr-flash", alias="ASR_MODEL")
+    asr_timeout: int = Field(default=30, alias="ASR_TIMEOUT")
+    asr_max_audio_seconds: int = Field(default=60, alias="ASR_MAX_AUDIO_SECONDS")
 
     # 知识管理 Admin Token（空则跳过鉴权）
     knowledge_admin_token: str = Field(default="", alias="KNOWLEDGE_ADMIN_TOKEN")
@@ -234,6 +250,13 @@ def load_config() -> dict:
         "rag": {
             "top_k": int(_get(["rag", "top_k"], json_cfg, env_settings.rag_top_k, 5)),
             "role_collections": _get(["rag", "role_collections"], json_cfg, env_settings.rag_role_collections, '{"普兰": "pulan_default"}'),
+        },
+        "asr": {
+            "endpoint": _get(["asr", "endpoint"], json_cfg, env_settings.asr_endpoint, "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+            "api_key": _get(["asr", "api_key"], json_cfg, env_settings.asr_api_key, ""),
+            "model": _get(["asr", "model"], json_cfg, env_settings.asr_model, "qwen3-asr-flash"),
+            "timeout": _get(["asr", "timeout"], json_cfg, env_settings.asr_timeout, 30),
+            "max_audio_seconds": _get(["asr", "max_audio_seconds"], json_cfg, env_settings.asr_max_audio_seconds, 60),
         },
         "knowledge_admin_token": env_settings.knowledge_admin_token or "",
     }
