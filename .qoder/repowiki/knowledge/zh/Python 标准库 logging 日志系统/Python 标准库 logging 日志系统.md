@@ -1,3 +1,13 @@
+---
+kind: logging_system
+name: Python 标准库 logging 日志系统
+category: logging_system
+scope:
+    - '**'
+source_files:
+    - server/main.py
+---
+
 ## 1. 使用的系统与框架
 - 采用 Python 标准库 `logging`，未引入第三方日志框架（如 loguru、structlog）。
 - 通过 FastAPI 入口 `server/main.py` 中的 `logging.basicConfig()` 完成全局根记录器配置。

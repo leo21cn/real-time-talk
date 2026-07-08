@@ -1,3 +1,21 @@
+---
+kind: build_system
+name: 构建与部署体系（Docker + Vite + Shell 脚本）
+category: build_system
+scope:
+    - '**'
+source_files:
+    - Dockerfile
+    - docker-compose.yml
+    - docker-stack.yml
+    - client/package.json
+    - client/vite.config.ts
+    - server/requirements.txt
+    - deploy/test_suite.sh
+    - deploy/compress.ps1
+    - deploy/config/docker-stack.yml
+---
+
 ## 1. 使用的系统与方法
 - **后端容器化**：基于 `python:3.11-slim` 的 Dockerfile，使用 uvicorn 启动 FastAPI 服务；依赖通过 `requirements.txt` 锁定。
 - **前端构建**：React + TypeScript + Vite，`client/package.json` 中定义 `dev/build/preview` 脚本，输出产物到 `client/dist`。

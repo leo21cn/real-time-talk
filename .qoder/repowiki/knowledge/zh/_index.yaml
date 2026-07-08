@@ -3,11 +3,11 @@ schema_version: 1
 locale: zh-CN
 branch: main
 nodes_managed: true
-exported_at: "2026-07-02T07:19:08Z"
+exported_at: "2026-07-07T12:21:53Z"
 modules:
     "":
-        dir_name: RealTimeTalk 实时数字人对话系统
-        title: RealTimeTalk 实时数字人对话系统
+        dir_name: RealTimeTalk 实时数字人对话全栈应用
+        title: RealTimeTalk 实时数字人对话全栈应用
         scope:
             - .gitignore
             - config.json
@@ -316,26 +316,9 @@ modules:
             - server
         depends_on: []
         related_to: []
-    build_system:
-        dir_name: 构建与部署体系（Docker + Vite + Shell 脚本）
-        title: 构建与部署体系（Docker + Vite + Shell 脚本）
-        scope: []
-        source_files:
-            - Dockerfile
-            - docker-compose.yml
-            - docker-stack.yml
-            - client/package.json
-            - client/vite.config.ts
-            - server/requirements.txt
-            - deploy/test_suite.sh
-            - deploy/compress.ps1
-            - deploy/config/docker-stack.yml
-        children: []
-        depends_on: []
-        related_to: []
     client:
-        dir_name: 实时对话前端（React + Vite）
-        title: 实时对话前端（React + Vite）
+        dir_name: RealTimeTalk 数字人对话前端（React + Vite）
+        title: RealTimeTalk 数字人对话前端（React + Vite）
         scope:
             - client/
         source_files: []
@@ -343,80 +326,13 @@ modules:
         depends_on: []
         related_to:
             - path: server
-    configuration_system:
-        dir_name: 配置系统：pydantic-settings + JSON 双源合并与环境变量覆盖
-        title: 配置系统：pydantic-settings + JSON 双源合并与环境变量覆盖
-        scope: []
-        source_files:
-            - server/config.py
-            - config.json
-            - .env.example
-            - .env.production
-            - deploy/config/.env
-            - server/main.py
-            - clips/short-hair-teacher-girl/clips.toml
-        children: []
-        depends_on: []
-        related_to: []
-    dependency_management:
-        dir_name: Python_Node.js 双栈依赖管理
-        title: Python/Node.js 双栈依赖管理
-        scope: []
-        source_files:
-            - server/requirements.txt
-            - client/package.json
-            - client/package-lock.json
-            - Dockerfile
-        children: []
-        depends_on: []
-        related_to: []
+            - path: server/app_entrypoint
     docs:
         dir_name: 项目文档与部署手册
         title: 项目文档与部署手册
         scope:
             - doc/
         source_files: []
-        children: []
-        depends_on: []
-        related_to:
-            - path: server/app_entrypoint
-    error_handling:
-        dir_name: 错误处理体系：领域异常 + FastAPI HTTPException + WebSocket 事件化错误
-        title: 错误处理体系：领域异常 + FastAPI HTTPException + WebSocket 事件化错误
-        scope: []
-        source_files:
-            - server/services/llm_client.py
-            - server/services/minio_client.py
-            - server/api/ws_handler.py
-            - server/api/routes_knowledge.py
-            - server/api/routes_clips.py
-        children: []
-        depends_on: []
-        related_to: []
-    frontend_style:
-        dir_name: 内联样式驱动的轻量级前端风格体系
-        title: 内联样式驱动的轻量级前端风格体系
-        scope: []
-        source_files:
-            - client/src/App.tsx
-            - client/src/components/AdminPage.tsx
-            - client/src/components/ChatPanel.tsx
-            - client/src/components/ChatBubble.tsx
-            - client/src/components/SpeechBubble.tsx
-            - client/src/components/ErrorBubble.tsx
-            - client/src/components/InputBox.tsx
-            - client/src/components/AvatarView.tsx
-            - client/src/components/KnowledgePanel.tsx
-            - client/package.json
-        children: []
-        depends_on: []
-        related_to: []
-    logging_system:
-        dir_name: Python 标准库 logging 日志系统
-        title: Python 标准库 logging 日志系统
-        scope: []
-        source_files:
-            - server/main.py
         children: []
         depends_on: []
         related_to: []
@@ -442,4 +358,4 @@ modules:
         children: []
         depends_on: []
         related_to:
-            - path: docs
+            - path: client

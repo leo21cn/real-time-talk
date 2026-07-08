@@ -1,3 +1,17 @@
+---
+kind: error_handling
+name: 错误处理体系：领域异常 + FastAPI HTTPException + WebSocket 事件化错误
+category: error_handling
+scope:
+    - '**'
+source_files:
+    - server/services/llm_client.py
+    - server/services/minio_client.py
+    - server/api/ws_handler.py
+    - server/api/routes_knowledge.py
+    - server/api/routes_clips.py
+---
+
 ## 1. 整体方案概述
 本仓库采用「分层异常 + 协议内错误消息」的混合模式：
 - 外部 REST API 通过 FastAPI 的 `HTTPException` 返回标准 HTTP 错误码与 detail。

@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: ""
-title: RealTimeTalk 实时数字人对话系统
+title: RealTimeTalk 实时数字人对话全栈应用
 scope:
     - .gitignore
     - config.json

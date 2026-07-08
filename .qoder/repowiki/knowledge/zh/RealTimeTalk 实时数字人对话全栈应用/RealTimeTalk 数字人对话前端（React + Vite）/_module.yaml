@@ -1,9 +1,10 @@
 schema_version: 1
 module_path: client
-title: 实时对话前端（React + Vite）
+title: RealTimeTalk 数字人对话前端（React + Vite）
 scope:
     - client/
 source_files: []
 depends_on: []
 related_to:
     - path: server
+    - path: server/app_entrypoint

@@ -1,3 +1,19 @@
+---
+kind: configuration_system
+name: 配置系统：pydantic-settings + JSON 双源合并与环境变量覆盖
+category: configuration_system
+scope:
+    - '**'
+source_files:
+    - server/config.py
+    - config.json
+    - .env.example
+    - .env.production
+    - deploy/config/.env
+    - server/main.py
+    - clips/short-hair-teacher-girl/clips.toml
+---
+
 ## 1. 采用的框架与工具
 - pydantic-settings（BaseSettings）：用于环境变量到强类型配置的解析，提供字段别名、默认值与类型校验。
 - JSON 配置文件 config.json：作为可提交的默认/共享配置基线。

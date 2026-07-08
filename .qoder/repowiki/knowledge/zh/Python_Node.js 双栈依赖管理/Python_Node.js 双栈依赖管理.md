@@ -1,3 +1,16 @@
+---
+kind: dependency_management
+name: Python/Node.js 双栈依赖管理
+category: dependency_management
+scope:
+    - '**'
+source_files:
+    - server/requirements.txt
+    - client/package.json
+    - client/package-lock.json
+    - Dockerfile
+---
+
 本项目采用 Python + Node.js 双技术栈，分别使用 pip 与 npm 进行依赖声明与安装，并通过 Dockerfile 在构建期完成依赖解析。
 
 - 后端（Python）：依赖清单位于 server/requirements.txt，使用 >= 宽松版本约束声明 FastAPI、uvicorn、websockets、httpx、redis[hiredis]、minio、pydantic、qdrant-client 等运行时库；未使用 pip-tools、poetry 或 Pipfile，也未生成 requirements.lock 类锁定文件。
