@@ -1,12 +1,12 @@
 {
   "llm": {
     "endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    "api_key": "sk-6d5919bf09be409893953f91a24bffe7",
+    "api_key": "sk-ws-H.REXDPHD.PD1H.MEYCIQCsS0-b2j8yq-0z-MSnN34Ci-jRA1w3P-2tqpS6IKE0pwIhAM290_BVJS8bjjC19agHmDedMLpEYy-9c_2m5BABLRdB",
     "model": "qwen-turbo",
     "max_tokens": 2048
   },
   "tts": {
-    "api_key": "sk-6d5919bf09be409893953f91a24bffe7",
+    "api_key": "sk-ws-H.REXDPHD.PD1H.MEYCIQCsS0-b2j8yq-0z-MSnN34Ci-jRA1w3P-2tqpS6IKE0pwIhAM290_BVJS8bjjC19agHmDedMLpEYy-9c_2m5BABLRdB",
     "voice": "Cherry",
     "speed": 1.0
   },

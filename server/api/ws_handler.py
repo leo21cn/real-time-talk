@@ -372,9 +372,10 @@ class WsHandler:
                     logger.warning("RAG 跳过: 无可用集合")
                     return None
             elif isinstance(role_cols, list):
-                collections = role_cols
+                # 统一规范化，避免 .env 中 "pulan-default" 与 Qdrant 中 "pulan_default" 漂移导致 404
+                collections = [QdrantClient.normalize_collection_name(c) for c in role_cols]
             else:
-                collections = [role_cols]
+                collections = [QdrantClient.normalize_collection_name(role_cols)]
 
             embeddings = await self.agent.embedding.embed([query])
             query_vector = embeddings[0]

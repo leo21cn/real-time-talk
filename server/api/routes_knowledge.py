@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel
 
 from server.config import get_config
+from server.services.qdrant_client import QdrantClient
 
 logger = logging.getLogger(__name__)
 
@@ -107,8 +108,8 @@ async def create_collection(req: CreateCollectionRequest, _auth: None = Depends(
     """创建新集合"""
     if not req.name or not req.name.strip():
         raise HTTPException(status_code=400, detail="集合名称不能为空")
-    # 集合名规范化：小写+下划线
-    name = req.name.strip().lower().replace(" ", "_").replace("-", "_")
+    # 集合名规范化：小写+下划线（与 RAG 检索共用同一条规范，避免漂移）
+    name = QdrantClient.normalize_collection_name(req.name)
     try:
         result = await _qdrant.create_collection(name, vector_size=req.vector_size)
         return result
@@ -142,6 +143,8 @@ async def ingest_knowledge(req: IngestRequest, _auth: None = Depends(verify_admi
         raise HTTPException(status_code=400, detail="collection 不能为空")
     if not req.documents:
         raise HTTPException(status_code=400, detail="documents 不能为空")
+    # 集合名规范化，与创建/检索保持一致，避免“创建 pulan_default、摄入 pulan-default”
+    collection = QdrantClient.normalize_collection_name(req.collection)
 
     try:
         from server.rag import chunk_text
@@ -156,7 +159,7 @@ async def ingest_knowledge(req: IngestRequest, _auth: None = Depends(verify_admi
                 all_sources.append(doc.source or "")
 
         # 2. 嵌入（批量）
-        logger.info(f"开始嵌入 {len(all_texts)} 个文本块...")
+        logger.info(f"开始嵌入 {len(all_texts)} 个文本块到集合 '{collection}'...")
         embeddings = await _embedding.embed(all_texts)
 
         # 3. 写入 Qdrant
@@ -171,15 +174,16 @@ async def ingest_knowledge(req: IngestRequest, _auth: None = Depends(verify_admi
                 },
             })
 
-        await _qdrant.upsert(req.collection, points)
+        await _qdrant.upsert(collection, points)
 
         # 4. 统计
-        total = await _qdrant.count(req.collection)
+        total = await _qdrant.count(collection)
 
         return {
             "ingested": len(points),
             "total_points": total,
-            "collection": req.collection,
+            "collection": collection,
+            "requested_collection": req.collection,
         }
     except Exception as e:
         logger.error(f"知识摄入失败: {e}")
@@ -194,6 +198,7 @@ async def get_stats(collection: Optional[str] = Query(None), _auth: None = Depen
     """获取知识库统计信息"""
     try:
         if collection:
+            collection = QdrantClient.normalize_collection_name(collection)
             info = await _qdrant.collection_info(collection)
             return {"collection": info["name"], "points_count": info["points_count"]}
         else:
@@ -223,6 +228,7 @@ async def clear_knowledge(collection: str = Query(...), _auth: None = Depends(ve
     if not collection:
         raise HTTPException(status_code=400, detail="collection 不能为空")
     try:
+        collection = QdrantClient.normalize_collection_name(collection)
         await _qdrant.clear_collection(collection)
         return {"status": "cleared", "collection": collection}
     except Exception as e:
@@ -244,6 +250,7 @@ async def search_knowledge(
         query_vector = embeddings[0]
 
         if collection:
+            collection = QdrantClient.normalize_collection_name(collection)
             results = await _qdrant.search(collection, query_vector, limit=k)
         else:
             names = await _qdrant.list_collections()

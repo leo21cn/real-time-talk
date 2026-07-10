@@ -205,26 +205,27 @@ ssh root@121.199.53.233 "docker service logs real-time-talk_server --tail 50"
 
 #### 7.1 创建默认知识库 Collection
 
-部署后需要创建默认的 Qdrant collection `pulan-default`（向量维度 1024，Cosine 距离）：
+部署后需要创建默认的 Qdrant collection `pulan_default`（向量维度 1024，Cosine 距离）。**注意：服务端会对集合名统一规范化（连字符/空格 → 下划线），无论以 `pulan-default` 还是 `pulan_default` 创建或检索，最终都会落到 `pulan_default`（下划线）这个集合。**：
 
 ```powershell
 # 方式一：通过 RealTimeTalk 知识库 API 创建（需要先配置 admin token）
+# 下面三个名字都会被规范化到同一个集合 'pulan_default'
 curl -k -X POST https://pulan.smartmoves.com.cn/api/knowledge/collections \
   -H "Content-Type: application/json" \
   -H "X-Admin-Token: km-tk-111111" \
-  -d '{"name": "pulan-default", "vector_size": 1024}'
+  -d '{"name": "pulan_default", "vector_size": 1024}'
 
-# 方式二：直接通过 Qdrant API 创建（Qdrant 容器内部）
-ssh root@121.199.53.233 "docker exec \$(docker ps --filter name=qdrant -q) curl -X PUT http://localhost:6333/collections/pulan-default -H 'Content-Type: application/json' -d '{\"vectors\":{\"size\":1024,\"distance\":\"Cosine\"}}'"
+# 方式二：直接通过 Qdrant API 创建（Qdrant 容器内部，注意这里写死下划线名）
+ssh root@121.199.53.233 "docker exec \$(docker ps --filter name=qdrant -q) curl -X PUT http://localhost:6333/collections/pulan_default -H 'Content-Type: application/json' -d '{\"vectors\":{\"size\":1024,\"distance\":\"Cosine\"}}'"
 ```
 
 验证 collection 已创建：
 
 ```powershell
-ssh root@121.199.53.233 "docker exec \$(docker ps --filter name=qdrant -q) curl http://localhost:6333/collections/pulan-default"
+ssh root@121.199.53.233 "docker exec \$(docker ps --filter name=qdrant -q) curl http://localhost:6333/collections/pulan_default"
 ```
 
-> 生产环境 `.env.production` 中 `ROLE_COLLECTIONS` 已配置为 `{"普兰": ["pulan-default"]}`，RAG 检索将限定在该 collection 内。
+> 生产环境 `.env.production` 中 `ROLE_COLLECTIONS` 已配置为 `{"普兰": "pulan_default"}`，RAG 检索将限定在该 collection 内。即使你误写成 `["pulan-default"]`（连字符）或 `["pulan default"]`（带空格），服务端会在检索前自动规范化到 `pulan_default`，不会 404。
 
 ### 步骤 8：申请 SSL 证书
 

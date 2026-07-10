@@ -10,6 +10,7 @@ from server.agent.conversation_manager import ConversationManager
 from server.config import get_config
 from server.rag import build_rag_context
 from server.services.llm_client import LlmClient, LlmClientError
+from server.services.qdrant_client import QdrantClient
 from server.services.redis_client import RedisClient
 
 logger = logging.getLogger(__name__)
@@ -151,9 +152,10 @@ class AgentEngine:
                     logger.warning("RAG: 无可用集合，跳过检索")
                     return None
             elif isinstance(role_cols, list):
-                collections = role_cols
+                # 统一规范化，避免 .env 中 "pulan-default" 与 Qdrant 中 "pulan_default" 漂移导致 404
+                collections = [QdrantClient.normalize_collection_name(c) for c in role_cols]
             else:
-                collections = [role_cols]
+                collections = [QdrantClient.normalize_collection_name(role_cols)]
 
             # 嵌入查询
             embeddings = await self.embedding.embed([query])

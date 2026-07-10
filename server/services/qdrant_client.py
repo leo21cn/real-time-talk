@@ -229,6 +229,18 @@ class QdrantClient:
         return r.status_code == 200
 
     @staticmethod
+    def normalize_collection_name(name: str) -> str:
+        """
+        统一集合名规范化：小写 + 空格/连字符转下划线。
+
+        所有涉及 Qdrant 集合名的入口（摄入、检索、创建）必须调用此函数，
+        保证写入端与读取端看到的名称一致，避免“存进 pulan_default、查 pulan-default”的 404。
+        """
+        if name is None:
+            return ""
+        return name.strip().lower().replace(" ", "_").replace("-", "_")
+
+    @staticmethod
     def generate_id() -> str:
         """生成唯一文档 ID"""
         return str(uuid.uuid4())
