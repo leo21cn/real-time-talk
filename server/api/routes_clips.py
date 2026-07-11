@@ -26,24 +26,36 @@ async def get_clip(name: str):
     获取切片文件或待机动画。
 
     支持路径:
+    - /api/clips/analysis.mp4       → clips/.mp4/analysis.mp4
     - /api/clips/analysis.webm       → clips/.webm/analysis.webm
+    - /api/clips/idle/idle_breathing.mp4 → clips/idle/idle_breathing.mp4
     - /api/clips/idle/idle_breathing.webm → clips/idle/idle_breathing.webm
+
+    移动端兼容：优先返回 mp4（H.264），未找到则回退 webm。
 
     Args:
         name: 文件名或子路径
     """
     clips_dir = _get_clips_dir()
 
-    # 尝试多个可能的路径
+    # 根据扩展名推导 media_type
+    media_type = "video/mp4" if name.lower().endswith(".mp4") else "video/webm"
+
+    # 尝试多个可能的路径（mp4 优先，移动端友好）
     candidates = [
-        clips_dir / ".webm" / name,           # 转换后的 .webm 切片
+        clips_dir / ".mp4" / name,            # 转换后的 .mp4 切片
         clips_dir / name,                      # 直接路径（idle 等）
+        clips_dir / ".webm" / name,            # 转换后的 .webm 切片（回退）
     ]
 
     # 额外检查：是否匹配配置中的待机动画路径
     idle_path = Path(get_config()["avatar"]["idle_animation"])
     if name == str(idle_path.relative_to(clips_dir)).replace("\\", "/"):
         candidates.append(idle_path)
+    # 兼容 idle 的 mp4 副本
+    idle_mp4 = idle_path.with_suffix(".mp4")
+    if name == str(idle_mp4.relative_to(clips_dir)).replace("\\", "/"):
+        candidates.append(idle_mp4)
 
     for candidate in candidates:
         try:
@@ -61,7 +73,7 @@ async def get_clip(name: str):
 
                 return FileResponse(
                     str(resolved),
-                    media_type="video/webm",
+                    media_type=media_type,
                     headers={
                         "Cache-Control": "no-cache, no-store, must-revalidate",
                         "Pragma": "no-cache",

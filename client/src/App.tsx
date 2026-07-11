@@ -18,9 +18,21 @@ import type { AvatarViewHandle } from './components/AvatarView';
 import ChatPanel from './components/ChatPanel';
 import ErrorBubble from './components/ErrorBubble';
 
-// 资源路径（v=8 确保浏览器加载 yuv420p 无透明版）
+// 资源路径（v=8 确保浏览器加载 yuv420p 无透明版；v=9 是 analysis 备用副本）
+// mp4 副本作为移动端 fallback（iOS Safari / 微信内置浏览器对 WebM/VP9 解码不稳定）
 const IDLE_SRC = '/api/clips/idle/idle_breathing.webm?v=8';
+const IDLE_MP4_SRC = '/api/clips/idle/idle_breathing.mp4?v=8';
 const ANALYSIS_SRC = '/api/clips/idle/idle_breathing.webm?v=9';
+const ANALYSIS_MP4_SRC = '/api/clips/idle/idle_breathing.mp4?v=9';
+
+// 检测是否需要优先使用 mp4（iOS Safari、微信内置浏览器对 WebM/VP9 支持不稳定）
+function prefersMp4(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent;
+  // iOS 全系列 + 微信内置浏览器
+  return /iPhone|iPad|iPod/i.test(ua) || /MicroMessenger/i.test(ua);
+}
+const USE_MP4 = prefersMp4();
 
 // ─── 消息 ID 生成器 ───
 let msgCounter = 0;
@@ -63,6 +75,8 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [currentSegmentIndex, setCurrentSegmentIndex] = useState<number>(-1);
+  const [isMobile, setIsMobile] = useState<boolean>(false);
+  const [needsUserTap, setNeedsUserTap] = useState<boolean>(true);
 
   // Refs
   const avatarRef = useRef<AvatarViewHandle>(null);
@@ -74,6 +88,53 @@ export default function App() {
   useEffect(() => {
     currentSegmentIndexRef.current = currentSegmentIndex;
   }, [currentSegmentIndex]);
+
+  // ─── 响应式布局：屏幕宽度 < 768px 时切换为竖排布局 ───
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mql = window.matchMedia('(max-width: 767px)');
+    const handler = (e: MediaQueryListEvent | MediaQueryList) => {
+      setIsMobile(e.matches);
+    };
+    handler(mql);
+    // 监听屏幕旋转 / 浏览器 resize
+    if (mql.addEventListener) {
+      mql.addEventListener('change', handler);
+      return () => mql.removeEventListener('change', handler);
+    } else {
+      // 旧版 Safari 兼容
+      mql.addListener(handler);
+      return () => mql.removeListener(handler);
+    }
+  }, []);
+
+  // ─── 移动端自动播放解锁：首次用户交互后才允许视频播放 ───
+  // iOS Safari / 微信内置浏览器要求用户必须点击页面后才能播放视频
+  useEffect(() => {
+    if (!isMobile) return; // 桌面端不需要引导遮罩
+    if (!needsUserTap) return;
+
+    const onFirstTap = () => {
+      unlockAudio();
+      // 显式触发 idle 播放，确保用户首次交互后视频立即显示
+      avatarRef.current?.playLoop(USE_MP4 ? IDLE_MP4_SRC : IDLE_SRC);
+      setNeedsUserTap(false);
+      // 解绑事件（仅触发一次）
+      window.removeEventListener('pointerdown', onFirstTap);
+      window.removeEventListener('touchstart', onFirstTap);
+      window.removeEventListener('keydown', onFirstTap);
+    };
+
+    window.addEventListener('pointerdown', onFirstTap, { once: true, passive: true });
+    window.addEventListener('touchstart', onFirstTap, { once: true, passive: true });
+    window.addEventListener('keydown', onFirstTap, { once: true });
+
+    return () => {
+      window.removeEventListener('pointerdown', onFirstTap);
+      window.removeEventListener('touchstart', onFirstTap);
+      window.removeEventListener('keydown', onFirstTap);
+    };
+  }, [isMobile, needsUserTap]);
 
   // ─── WebSocket 事件处理 ───
   const handleSegmentReady = useCallback((event: ServerEvent) => {
@@ -127,7 +188,7 @@ export default function App() {
       case 'play_analysis':
         if (appStateRef.current !== AppState.Speaking) {
           setAppState(AppState.Bridging);
-          avatarRef.current?.playLoop(ANALYSIS_SRC);
+          avatarRef.current?.playLoop(USE_MP4 ? ANALYSIS_MP4_SRC : ANALYSIS_SRC);
         }
         break;
 
@@ -150,7 +211,7 @@ export default function App() {
           deferredIdleRef.current = true;
         } else {
           setAppState(AppState.Idle);
-          avatarRef.current?.playLoop(IDLE_SRC);
+          avatarRef.current?.playLoop(USE_MP4 ? IDLE_MP4_SRC : IDLE_SRC);
           setMessages(prev => {
             const msgs = [...prev];
             const last = msgs[msgs.length - 1];
@@ -166,7 +227,7 @@ export default function App() {
         console.error('服务端错误:', event.message);
         setErrorMessage(event.message);
         setAppState(AppState.Idle);
-        avatarRef.current?.playLoop(IDLE_SRC);
+        avatarRef.current?.playLoop(USE_MP4 ? IDLE_MP4_SRC : IDLE_SRC);
         setMessages(prev => {
           const msgs = [...prev];
           const last = msgs[msgs.length - 1];
@@ -202,7 +263,7 @@ export default function App() {
           // 末段：切换到 idle 循环
           deferredIdleRef.current = false;
           setAppState(AppState.Idle);
-          avatarRef.current?.playLoop(IDLE_SRC);
+          avatarRef.current?.playLoop(USE_MP4 ? IDLE_MP4_SRC : IDLE_SRC);
           setMessages(prev => {
             const msgs = [...prev];
             const last = msgs[msgs.length - 1];
@@ -246,7 +307,7 @@ export default function App() {
     setMessages(prev => [...prev, userMsg, aiMsg]);
 
     setAppState(AppState.Thinking);
-    avatarRef.current?.playLoop(ANALYSIS_SRC);
+    avatarRef.current?.playLoop(USE_MP4 ? ANALYSIS_MP4_SRC : ANALYSIS_SRC);
 
     ws.sendMessage(text);
   }, [ws]);
@@ -260,34 +321,43 @@ export default function App() {
                        appState === AppState.Speaking ||
                        appState === AppState.Bridging;
 
+  // ─── 响应式布局参数 ───
+  const rootStyle: React.CSSProperties = {
+    width: '100vw',
+    height: '100vh',
+    background: '#FFFFFF',
+    position: 'relative',
+    overflow: 'hidden',
+    display: 'flex',
+    alignItems: isMobile ? 'stretch' : 'center',
+    justifyContent: 'center',
+    // 小屏：上下安全区 + 更小 padding
+    padding: isMobile ? 'max(8px, env(safe-area-inset-top)) 8px max(8px, env(safe-area-inset-bottom)) 8px' : '20px',
+    boxSizing: 'border-box',
+    gap: isMobile ? '8px' : '24px',
+    // 小屏：竖排（形象上 / 聊天下）；大屏：横排
+    flexDirection: isMobile ? 'column' : 'row',
+  };
+
   // ─── 渲染 ───
   return (
-    <div
-      style={{
-        width: '100vw',
-        height: '100vh',
-        background: '#FFFFFF',
-        position: 'relative',
-        overflow: 'hidden',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '20px',
-        boxSizing: 'border-box',
-        gap: '24px',
-      }}
-    >
-      {/* 左侧：普兰形象 */}
+    <div style={rootStyle}>
+      {/* 形象（移动端在上方缩小，桌面端在左侧） */}
       <AvatarView
         ref={avatarRef}
         idleSrc={IDLE_SRC}
+        idleMp4Src={IDLE_MP4_SRC}
+        analysisSrc={ANALYSIS_SRC}
+        analysisMp4Src={ANALYSIS_MP4_SRC}
+        isMobile={isMobile}
       />
 
-      {/* 右侧：聊天面板 */}
+      {/* 聊天面板（移动端占满下方，桌面端在右侧） */}
       <ChatPanel
         messages={messages}
         onSend={handleSend}
         disabled={isProcessing}
+        isMobile={isMobile}
       />
 
       {/* 错误提示 */}
@@ -312,6 +382,62 @@ export default function App() {
       >
         {appState}
       </div>
+
+      {/* 移动端首次访问引导遮罩：点击解锁视频自动播放 */}
+      {isMobile && needsUserTap && (
+        <div
+          onClick={() => {
+            // 显式调用一次（pointerdown 会先触发，但这里确保 click 也生效）
+            unlockAudio();
+            avatarRef.current?.playLoop(USE_MP4 ? IDLE_MP4_SRC : IDLE_SRC);
+            setNeedsUserTap(false);
+          }}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(255, 255, 255, 0.92)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            cursor: 'pointer',
+            userSelect: 'none',
+            WebkitTapHighlightColor: 'transparent',
+          }}
+        >
+          <div
+            style={{
+              width: 88,
+              height: 88,
+              borderRadius: '50%',
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: 20,
+              boxShadow: '0 8px 24px rgba(102, 126, 234, 0.4)',
+              animation: 'pulse 2s ease-in-out infinite',
+            }}
+          >
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="#fff">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+          </div>
+          <div style={{ fontSize: 20, fontWeight: 600, color: '#333', marginBottom: 8 }}>
+            点击与普兰对话
+          </div>
+          <div style={{ fontSize: 13, color: '#999' }}>
+            点击屏幕开始
+          </div>
+          <style>{`
+            @keyframes pulse {
+              0%, 100% { transform: scale(1); box-shadow: 0 8px 24px rgba(102, 126, 234, 0.4); }
+              50% { transform: scale(1.05); box-shadow: 0 8px 32px rgba(102, 126, 234, 0.6); }
+            }
+          `}</style>
+        </div>
+      )}
 
       {/* 气泡样式 */}
       <style>{`

@@ -2,7 +2,16 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <!-- 移动端适配：viewport-fit=cover 让 iOS 刘海屏 env(safe-area-inset-*) 生效 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <!-- iOS Safari: 启用 Web App 模式，链接打开全屏 -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <!-- 微信内置浏览器：X5 内核视频解码优化 -->
+    <meta name="x5-orientation" content="portrait" />
+    <meta name="x5-fullscreen" content="true" />
+    <meta name="x5-page-mode" content="app" />
+    <meta name="format-detection" content="telephone=no, email=no, address=no" />
     <title>普兰 - 项目管理问询助理</title>
     <link rel="icon" type="image/png" href="/favicon.png" />
     <style>
@@ -17,6 +26,10 @@
         overflow: hidden;
         background: #FFFFFF;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+        /* iOS Safari: 防止弹性滚动导致页面被下拉刷新 */
+        overscroll-behavior: none;
+        -webkit-overflow-scrolling: touch;
+        -webkit-tap-highlight-color: transparent;
       }
       @keyframes typingBounce {
         from { opacity: 0.3; transform: translateY(0); }

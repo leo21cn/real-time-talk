@@ -13,9 +13,11 @@ interface ChatPanelProps {
   messages: ChatMessage[];
   onSend: (text: string) => void;
   disabled?: boolean;
+  /** 是否为移动端布局（控制最小宽度与高度） */
+  isMobile?: boolean;
 }
 
-export default function ChatPanel({ messages, onSend, disabled }: ChatPanelProps) {
+export default function ChatPanel({ messages, onSend, disabled, isMobile = false }: ChatPanelProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -82,14 +84,18 @@ export default function ChatPanel({ messages, onSend, disabled }: ChatPanelProps
       style={{
         display: 'flex',
         flexDirection: 'column',
-        height: '75vh',
+        // 移动端：剩余空间（68vh - 头像 - padding）
+        // 桌面端：保持 75vh
+        height: isMobile ? 'calc(100vh - 32vh - 24px)' : '75vh',
         maxHeight: '100vh',
         background: '#FAFAFA',
         border: '1px solid #e8e8e8',
         borderRadius: 12,
         overflow: 'hidden',
         flex: 1,
-        minWidth: 360,
+        // 桌面端：最小宽度 360（保证输入框可读）
+        // 移动端：不限制最小宽度，让面板占满屏幕
+        minWidth: isMobile ? 0 : 360,
         boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
       }}
     >

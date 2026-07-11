@@ -21,11 +21,29 @@ export interface AvatarViewHandle {
 }
 
 interface AvatarViewProps {
+  /** 待机动画的 webm URL（默认/首选） */
   idleSrc?: string;
+  /** 待机动画的 mp4 URL（移动端 fallback） */
+  idleMp4Src?: string;
+  /** thinking 分析动画的 webm URL（默认/首选） */
+  analysisSrc?: string;
+  /** thinking 分析动画的 mp4 URL（移动端 fallback） */
+  analysisMp4Src?: string;
+  /** 是否为移动端布局（控制高度） */
+  isMobile?: boolean;
 }
 
 const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
-  function AvatarView({ idleSrc = '/api/clips/idle/idle_breathing.webm' }, ref) {
+  function AvatarView(
+    {
+      idleSrc = '/api/clips/idle/idle_breathing.webm?v=8',
+      idleMp4Src = '/api/clips/idle/idle_breathing.mp4?v=8',
+      analysisSrc = '/api/clips/idle/idle_breathing.webm?v=9',
+      analysisMp4Src = '/api/clips/idle/idle_breathing.mp4?v=9',
+      isMobile = false,
+    },
+    ref
+  ) {
     const mainVideoRef = useRef<HTMLVideoElement>(null);
     const loopVideoRef = useRef<HTMLVideoElement>(null);
     const pendingSrcRef = useRef<string | null>(null);
@@ -37,6 +55,56 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
     const activeElementRef = useRef<'main' | 'loop'>('loop'); // 当前可见的视频元素
     const loopIsSegmentRef = useRef(false); // loop 是否正在播放 segment（用于 ended 判断）
     const idleLoopActiveRef = useRef(false); // JS 手动接管 idle 无缝循环
+    const loopMp4TriedRef = useRef(false); // loopVideo 是否已尝试 mp4 fallback（避免无限循环）
+    const mainMp4TriedRef = useRef(false); // mainVideo 是否已尝试 mp4 fallback
+
+    // 把 props 的 mp4 URL 同步到 ref，避免闭包问题
+    const idleMp4Ref = useRef(idleMp4Src);
+    const analysisMp4Ref = useRef(analysisMp4Src);
+    idleMp4Ref.current = idleMp4Src;
+    analysisMp4Ref.current = analysisMp4Src;
+
+    /** 根据当前 loopVideo src 判断对应的 mp4 fallback URL */
+    const pickLoopMp4Fallback = useCallback((): string | null => {
+      const loopVideo = loopVideoRef.current;
+      if (!loopVideo) return null;
+      const src = loopVideo.src;
+      if (!src) return null;
+      // 当前是 mp4，无需 fallback
+      if (src.includes('.mp4')) return null;
+      // 根据路径特征判断是 idle 还是 analysis
+      if (src.includes('analysis')) return analysisMp4Ref.current;
+      return idleMp4Ref.current;
+    }, []);
+
+    /** loopVideo 错误兜底：webm 失败时尝试 mp4（仅一次） */
+    const handleLoopError = useCallback(() => {
+      if (loopMp4TriedRef.current) return;
+      const loopVideo = loopVideoRef.current;
+      if (!loopVideo) return;
+      const fallback = pickLoopMp4Fallback();
+      if (!fallback || fallback === loopVideo.src) return;
+      console.warn('[AvatarView] loopVideo webm 加载失败，尝试 mp4 fallback:', fallback);
+      loopMp4TriedRef.current = true;
+      loopVideo.src = fallback;
+      loopVideo.load();
+    }, [pickLoopMp4Fallback]);
+
+    /** mainVideo 错误兜底（用于 segments，未来扩展用） */
+    const handleMainError = useCallback(() => {
+      if (mainMp4TriedRef.current) return;
+      const mainVideo = mainVideoRef.current;
+      if (!mainVideo) return;
+      // segments 当前没有 mp4，仅记录日志
+      console.warn('[AvatarView] mainVideo 加载失败:', mainVideo.src);
+      mainMp4TriedRef.current = true;
+    }, []);
+
+    /** 切换 src 时重置 mp4 fallback 状态 */
+    const resetMp4Fallback = useCallback(() => {
+      loopMp4TriedRef.current = false;
+      mainMp4TriedRef.current = false;
+    }, []);
 
     /** 清理切换定时器 */
     const clearLoopSwitchTimer = useCallback(() => {
@@ -410,6 +478,9 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
         const loopVideo = loopVideoRef.current;
         if (!loopVideo) return;
 
+        // 切换主视频源时重置 mp4 fallback 状态
+        resetMp4Fallback();
+
         // thinkingMode 或 src 包含 analysis 时排队等待（防止 segment_ready 竞态跳过思考动画）
         if (thinkingModeRef.current || loopVideo.src.includes('analysis')) {
           pendingSrcRef.current = url;
@@ -427,6 +498,8 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
       },
 
       playLoop(src: string) {
+        // 切换循环视频源时重置 mp4 fallback 状态
+        resetMp4Fallback();
         // 更新思考模式标志
         thinkingModeRef.current = src.includes('analysis');
         // 如果从 analysis 切走，取消待播放的 segment
@@ -458,7 +531,7 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
       getVideoElement() {
         return mainVideoRef.current;
       },
-    }), [showMain, showLoop]);
+    }), [showMain, showLoop, resetMp4Fallback]);
 
     // 主视频播放完毕回调
     const onMainEnded = useCallback(() => {
@@ -535,13 +608,16 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
       <div
         style={{
           position: 'relative',
-          height: '75vh',
-          maxHeight: '100vh',
+          // 移动端：上方区域占 32vh（留下空间给聊天面板）
+          // 桌面端：75vh，靠 aspectRatio 9/16 自动算宽度
+          height: isMobile ? '32vh' : '75vh',
+          maxHeight: '100%',
           aspectRatio: '9 / 16',
           maxWidth: '100%',
           overflow: 'hidden',
           flexShrink: 0,
           background: '#FFFFFF',
+          alignSelf: isMobile ? 'center' : 'auto',
         }}
       >
         {/* 主视频（播放 segment，有声音） */}
@@ -563,6 +639,7 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
           playsInline
           preload="auto"
           onEnded={onMainEnded}
+          onError={handleMainError}
         />
 
         {/* 循环视频（idle / thinking，静音） */}
@@ -584,6 +661,7 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
           muted
           onTimeUpdate={onLoopTimeUpdate}
           onEnded={onLoopEnded}
+          onError={handleLoopError}
         />
       </div>
     );
