@@ -67,7 +67,7 @@ class EmbeddingConfig(BaseModel):
 
 class RagConfig(BaseModel):
     top_k: int = 5
-    role_collections: str = '{"普兰": "pulan_default"}'
+    role_collections: str = '{"普兰": "pulan_*"}'
 
 
 class AsrConfig(BaseModel):
@@ -128,7 +128,7 @@ class AppConfig(BaseSettings):
 
     # RAG 配置
     rag_top_k: int = Field(default=5, alias="RAG_TOP_K")
-    rag_role_collections: str = Field(default='{"普兰": "pulan_default"}', alias="ROLE_COLLECTIONS")
+    rag_role_collections: str = Field(default='{"普兰": "pulan_*"}', alias="ROLE_COLLECTIONS")
 
     # ASR 配置（API Key 复用 DASHSCOPE_API_KEY）
     asr_endpoint: str = Field(default="https://dashscope.aliyuncs.com/compatible-mode/v1", alias="ASR_ENDPOINT")
@@ -249,7 +249,7 @@ def load_config() -> dict:
         },
         "rag": {
             "top_k": int(_get(["rag", "top_k"], json_cfg, env_settings.rag_top_k, 5)),
-            "role_collections": _get(["rag", "role_collections"], json_cfg, env_settings.rag_role_collections, '{"普兰": "pulan_default"}'),
+            "role_collections": _get(["rag", "role_collections"], json_cfg, env_settings.rag_role_collections, '{"普兰": "pulan_*"}'),
         },
         "asr": {
             "endpoint": _get(["asr", "endpoint"], json_cfg, env_settings.asr_endpoint, "https://dashscope.aliyuncs.com/compatible-mode/v1"),

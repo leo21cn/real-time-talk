@@ -13,6 +13,7 @@ from server.models.session import SessionContext, SessionState
 from server.agent.agent_engine import AgentEngine
 from server.agent.conversation_manager import ConversationManager
 from server.rag import build_rag_context
+from server.rag.collections_resolver import resolve_search_collections
 from server.services.llm_client import LlmClient, LlmClientError
 from server.services.redis_client import RedisClient
 from server.services.minio_client import MinioClient
@@ -365,17 +366,12 @@ class WsHandler:
             role_cols = role_collections.get("普兰", "*")
             logger.info(f"RAG: role_cols={role_cols}, raw={role_collections_raw}")
 
-            if role_cols == "*":
-                collections = await self.agent.qdrant.list_collections()
-                logger.info(f"RAG: 从 Qdrant 获取到 {len(collections)} 个集合: {collections}")
-                if not collections:
-                    logger.warning("RAG 跳过: 无可用集合")
-                    return None
-            elif isinstance(role_cols, list):
-                # 统一规范化，避免 .env 中 "pulan-default" 与 Qdrant 中 "pulan_default" 漂移导致 404
-                collections = [QdrantClient.normalize_collection_name(c) for c in role_cols]
-            else:
-                collections = [QdrantClient.normalize_collection_name(role_cols)]
+            # 统一解析：支持 "*"、"pulan_*"、标量、列表四种语义
+            collections = await resolve_search_collections(self.agent.qdrant, role_cols)
+            logger.info(f"RAG: 解析得到 {len(collections)} 个集合: {collections}")
+            if not collections:
+                logger.warning("RAG 跳过: 无可用集合")
+                return None
 
             embeddings = await self.agent.embedding.embed([query])
             query_vector = embeddings[0]

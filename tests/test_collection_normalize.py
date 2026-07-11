@@ -14,6 +14,7 @@ tests/test_collection_normalize.py
 或：
   cd tests && python test_collection_normalize.py
 """
+import asyncio
 import json as _json
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -323,6 +324,186 @@ class TestRegressionHyphenVsUnderscore(unittest.TestCase):
             self.assertIn("参考", result)
         finally:
             server.config._config = original
+
+
+class TestRoleCollectionsWildcard(unittest.TestCase):
+    """覆盖 ROLE_COLLECTIONS 中通配语义（resolve_search_collections）"""
+
+    def _make_qdrant(self, collections):
+        """构造 mock QdrantClient，list_collections 返回指定集合"""
+        from unittest.mock import MagicMock
+        qdrant = MagicMock()
+        qdrant.list_collections = AsyncMock(return_value=collections)
+        return qdrant
+
+    def _run(self, role_cols, collections):
+        """调用 resolve_search_collections 并返回结果"""
+        from server.rag.collections_resolver import resolve_search_collections
+        qdrant = self._make_qdrant(collections)
+        return asyncio.run(resolve_search_collections(qdrant, role_cols))
+
+    def test_pulan_wildcard_filters_collections(self):
+        """role_cols='pulan_*' 应过滤出 pulan_ 前缀集合"""
+        result = self._run(
+            "pulan_*",
+            ["pulan_default", "pulan_kb_001", "other_kb", "pulan_test"],
+        )
+        self.assertEqual(set(result), {"pulan_default", "pulan_kb_001", "pulan_test"})
+
+    def test_pulan_wildcard_returns_empty_when_no_match(self):
+        """role_cols='pulan_*' 但 qdrant 中无 pulan_ 集合 → 空列表"""
+        result = self._run("pulan_*", ["other_kb", "test_kb"])
+        self.assertEqual(result, [])
+
+    def test_star_no_prefix_filter(self):
+        """role_cols='*' 应返回 qdrant 全部集合，不过滤"""
+        result = self._run("*", ["pulan_default", "other_kb", "test_collection"])
+        self.assertEqual(set(result), {"pulan_default", "other_kb", "test_collection"})
+
+    def test_wildcard_nonexistent_prefix_returns_empty(self):
+        """role_cols='nonexistent_*' → 空列表"""
+        result = self._run("nonexistent_*", ["pulan_default", "other_kb"])
+        self.assertEqual(result, [])
+
+    def test_explicit_list_still_works(self):
+        """现有列表语义不被破坏"""
+        result = self._run(
+            ["pulan_default", "Pulan-KB-001"],
+            ["pulan_default", "pulan_kb_001", "other_kb"],
+        )
+        # normalize: Pulan-KB-001 → pulan_kb_001
+        self.assertEqual(set(result), {"pulan_default", "pulan_kb_001"})
+
+    def test_scalar_still_works(self):
+        """现有标量语义不被破坏"""
+        result = self._run("pulan-default", ["pulan_default", "other_kb"])
+        self.assertEqual(result, ["pulan_default"])
+
+    def test_scalar_with_no_list_call(self):
+        """标量角色值不应触发 qdrant.list_collections 调用"""
+        from unittest.mock import MagicMock
+        from server.rag.collections_resolver import resolve_search_collections
+
+        qdrant = MagicMock()
+        qdrant.list_collections = AsyncMock(return_value=["pulan_default"])
+        asyncio.run(resolve_search_collections(qdrant, "pulan_default"))
+        qdrant.list_collections.assert_not_called()
+
+    def test_empty_string_returns_empty(self):
+        """空字符串 → 空列表"""
+        result = self._run("", ["pulan_default"])
+        self.assertEqual(result, [])
+
+    def test_none_returns_empty(self):
+        """None → 空列表"""
+        result = self._run(None, ["pulan_default"])
+        self.assertEqual(result, [])
+
+
+class TestQdrantClientHelpers(unittest.TestCase):
+    """覆盖 QdrantClient.is_wildcard 与 extract_prefix 静态方法"""
+
+    def test_is_wildcard_star(self):
+        self.assertTrue(QdrantClient.is_wildcard("*"))
+
+    def test_is_wildcard_with_prefix(self):
+        self.assertTrue(QdrantClient.is_wildcard("pulan_*"))
+
+    def test_is_wildcard_not(self):
+        self.assertFalse(QdrantClient.is_wildcard("pulan_default"))
+        self.assertFalse(QdrantClient.is_wildcard("pulan-default"))
+        self.assertFalse(QdrantClient.is_wildcard(""))
+
+    def test_is_wildcard_non_string(self):
+        self.assertFalse(QdrantClient.is_wildcard(None))
+        self.assertFalse(QdrantClient.is_wildcard(["pulan_*"]))
+        self.assertFalse(QdrantClient.is_wildcard(123))
+
+    def test_extract_prefix_with_prefix(self):
+        self.assertEqual(QdrantClient.extract_prefix("pulan_*"), "pulan_")
+
+    def test_extract_prefix_star(self):
+        self.assertEqual(QdrantClient.extract_prefix("*"), "")
+
+    def test_extract_prefix_no_wildcard(self):
+        self.assertEqual(QdrantClient.extract_prefix("pulan_default"), "")
+
+
+class TestAgentEngineWildcard(unittest.TestCase):
+    """覆盖 agent_engine 通过 ROLE_COLLECTIONS='pulan_*' 的检索路径"""
+
+    def _make_engine(self, role_collections_cfg, qdrant_collections):
+        from unittest.mock import MagicMock
+        from server.agent.agent_engine import AgentEngine
+        from server.services.llm_client import LlmClient
+        from server.services.redis_client import RedisClient
+
+        qdrant = MagicMock()
+        qdrant.list_collections = AsyncMock(return_value=qdrant_collections)
+        qdrant.search_multi = AsyncMock(return_value=[
+            {"id": "x", "score": 0.9, "payload": {"text": "t", "source": ""}, "collection": "pulan_default"},
+        ])
+
+        embedding = MagicMock()
+        embedding.embed = AsyncMock(return_value=[[0.0] * 1024])
+
+        engine = AgentEngine(
+            llm_client=MagicMock(spec=LlmClient),
+            redis_client=MagicMock(spec=RedisClient),
+            qdrant_client=qdrant,
+            embedding_client=embedding,
+        )
+
+        import server.config
+        original_cfg = server.config._config
+        server.config._config = {
+            "rag": {
+                "role_collections": role_collections_cfg,
+                "top_k": 5,
+            }
+        }
+        return engine, qdrant, lambda: setattr(server.config, "_config", original_cfg)
+
+    def test_pulan_wildcard_searches_all_matching_collections(self):
+        """配置 pulan_* 应能检索到多个 pulan_ 集合"""
+        engine, qdrant, restore = self._make_engine(
+            _json.dumps({"普兰": "pulan_*"}),
+            ["pulan_default", "pulan_kb_001", "other_kb"],
+        )
+        try:
+            result = asyncio.run(engine._retrieve_rag_context("测试"))
+            self.assertIsNotNone(result)
+            called = qdrant.search_multi.call_args.args[0]
+            self.assertEqual(set(called), {"pulan_default", "pulan_kb_001"})
+        finally:
+            restore()
+
+    def test_star_searches_all_collections(self):
+        """配置 * 应检索所有集合"""
+        engine, qdrant, restore = self._make_engine(
+            _json.dumps({"普兰": "*"}),
+            ["pulan_default", "other_kb"],
+        )
+        try:
+            asyncio.run(engine._retrieve_rag_context("测试"))
+            called = qdrant.search_multi.call_args.args[0]
+            self.assertEqual(set(called), {"pulan_default", "other_kb"})
+        finally:
+            restore()
+
+    def test_no_matching_collections_returns_none(self):
+        """配置 pulan_* 但 qdrant 中无匹配集合 → RAG 返回 None"""
+        engine, qdrant, restore = self._make_engine(
+            _json.dumps({"普兰": "pulan_*"}),
+            ["other_kb", "test_kb"],
+        )
+        try:
+            result = asyncio.run(engine._retrieve_rag_context("测试"))
+            self.assertIsNone(result)
+            # 不应调用 search_multi
+            qdrant.search_multi.assert_not_called()
+        finally:
+            restore()
 
 
 if __name__ == "__main__":

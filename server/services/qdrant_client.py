@@ -241,6 +241,16 @@ class QdrantClient:
         return name.strip().lower().replace(" ", "_").replace("-", "_")
 
     @staticmethod
+    def is_wildcard(name: str) -> bool:
+        """角色值是否含通配符：以 '*' 结尾的字符串"""
+        return isinstance(name, str) and name.endswith("*")
+
+    @staticmethod
+    def extract_prefix(wildcard: str) -> str:
+        """从通配符提取前缀：'pulan_*' → 'pulan_'，'*' → ''"""
+        return wildcard[:-1] if wildcard.endswith("*") else ""
+
+    @staticmethod
     def generate_id() -> str:
         """生成唯一文档 ID"""
         return str(uuid.uuid4())

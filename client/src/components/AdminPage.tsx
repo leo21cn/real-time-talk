@@ -42,6 +42,25 @@ function authHeaders(): Record<string, string> {
   return { 'X-Knowledge-Admin-Token': token };
 }
 
+/**
+ * fetch 封装：遇到 401 自动调用 onLogout 跳回登录页。
+ * 返回 null 表示 token 已失效，调用方应中断后续逻辑。
+ */
+async function fetchWithAuth(
+  url: string,
+  init: RequestInit | undefined,
+  onLogout: () => void,
+): Promise<Response | null> {
+  const headers = { ...authHeaders(), ...(init?.headers as Record<string, string> | undefined) };
+  const res = await fetch(url, { ...init, headers });
+  if (res.status === 401) {
+    // Token 失效（后端轮换或被手动调整），自动退出登录
+    onLogout();
+    return null;
+  }
+  return res;
+}
+
 /** Token 登录界面 */
 function LoginView({ onLogin }: { onLogin: (token: string) => void }) {
   const [token, setLocalToken] = useState('');
@@ -167,45 +186,65 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
 
-  // 加载集合列表（限定 pulan_default）
+  // 加载集合列表（限定 pulan_ 前缀，与 RAG 检索范围一致）
   const loadCollections = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/knowledge/collections`, {
-        headers: authHeaders(),
-      });
+      const res = await fetchWithAuth(
+        `${API_BASE}/api/knowledge/collections`,
+        undefined,
+        onLogout,
+      );
+      if (!res) return; // token 已失效，已跳回登录页
       const data = await res.json();
-      // 仅保留 pulan_default
       const allCollections: CollectionInfo[] = data.collections || [];
-      const filtered = allCollections.filter((c) => c.name === 'pulan_default');
+      // 仅展示 pulan_ 前缀的集合，避免出现 RAG 检索不到的孤儿集合
+      const filtered = allCollections.filter((c) => c.name.startsWith('pulan_'));
       setCollections(filtered);
-      if (filtered.length > 0) {
-        setSelectedCollection('pulan_default');
+      if (filtered.length > 0 && !filtered.some((c) => c.name === selectedCollection)) {
+        setSelectedCollection(filtered[0].name);
+      } else if (filtered.length === 0) {
+        setSelectedCollection('');
       }
     } catch {
       // 静默失败
     }
-  }, []);
+  }, [selectedCollection, onLogout]);
 
   useEffect(() => {
     loadCollections();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 集合名规范化：小写、空格/连字符转下划线（与后端 QdrantClient.normalize_collection_name 一致）
+  const normalizeCollectionName = (name: string): string =>
+    name.trim().toLowerCase().replace(/ /g, '_').replace(/-/g, '_');
+
   // 创建集合
   const handleCreateCollection = async () => {
     const name = newCollectionName.trim();
     if (!name) return;
+    // 强制 pulan_ 前缀：避免创建出 RAG 检索不到的孤儿集合
+    const normalized = normalizeCollectionName(name);
+    if (!normalized.startsWith('pulan_')) {
+      setStatusMsg(`创建失败：集合名称必须以 "pulan_" 开头，否则不会被 RAG 自动检索（输入 "${name}" 规范化后为 "${normalized}"）`);
+      return;
+    }
     setLoading(true);
     setStatusMsg('');
     try {
-      await fetch(`${API_BASE}/api/knowledge/collections`, {
-        method: 'POST',
-        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
-      });
+      const res = await fetchWithAuth(
+        `${API_BASE}/api/knowledge/collections`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: normalized }),
+        },
+        onLogout,
+      );
+      if (!res) return;
       setNewCollectionName('');
-      setStatusMsg(`集合 "${name}" 创建成功`);
+      setStatusMsg(`集合 "${normalized}" 创建成功`);
       await loadCollections();
-      setSelectedCollection(name.toLowerCase().replace(/ /g, '_').replace(/-/g, '_'));
+      setSelectedCollection(normalized);
     } catch (e: any) {
       setStatusMsg(`创建失败: ${e.message}`);
     } finally {
@@ -216,14 +255,16 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   // 删除集合
   const handleDeleteCollection = async () => {
     if (!selectedCollection) return;
-    if (!confirm(`确定要删除集合 "${selectedCollection}" 吗？其中所有知识将丢失。`)) return;
+    if (!confirm(`确定要删除集合 "${selectedCollection}" 吗？该操作不可恢复，其中所有知识将丢失。`)) return;
     setLoading(true);
     setStatusMsg('');
     try {
-      await fetch(`${API_BASE}/api/knowledge/collections/${selectedCollection}`, {
-        method: 'DELETE',
-        headers: authHeaders(),
-      });
+      const res = await fetchWithAuth(
+        `${API_BASE}/api/knowledge/collections/${selectedCollection}`,
+        { method: 'DELETE' },
+        onLogout,
+      );
+      if (!res) return;
       setStatusMsg(`集合 "${selectedCollection}" 已删除`);
       setSelectedCollection('');
       await loadCollections();
@@ -241,14 +282,19 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     setLoading(true);
     setStatusMsg('');
     try {
-      const res = await fetch(`${API_BASE}/api/knowledge/ingest`, {
-        method: 'POST',
-        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          collection: selectedCollection,
-          documents: [{ text }],
-        }),
-      });
+      const res = await fetchWithAuth(
+        `${API_BASE}/api/knowledge/ingest`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            collection: selectedCollection,
+            documents: [{ text }],
+          }),
+        },
+        onLogout,
+      );
+      if (!res) return;
       const data = await res.json();
       setIngestText('');
       setStatusMsg(`已添加 ${data.ingested} 条知识`);
@@ -268,9 +314,12 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     try {
       const params = new URLSearchParams({ q, k: '5' });
       if (selectedCollection) params.set('collection', selectedCollection);
-      const res = await fetch(`${API_BASE}/api/knowledge/search?${params}`, {
-        headers: authHeaders(),
-      });
+      const res = await fetchWithAuth(
+        `${API_BASE}/api/knowledge/search?${params}`,
+        undefined,
+        onLogout,
+      );
+      if (!res) return;
       const data = await res.json();
       setSearchResults(data.results || []);
     } catch (e: any) {

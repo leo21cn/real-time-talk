@@ -212,7 +212,7 @@ ssh root@121.199.53.233 "docker service logs real-time-talk_server --tail 50"
 # 下面三个名字都会被规范化到同一个集合 'pulan_default'
 curl -k -X POST https://pulan.smartmoves.com.cn/api/knowledge/collections \
   -H "Content-Type: application/json" \
-  -H "X-Admin-Token: km-tk-111111" \
+  -H "X-Admin-Token: shleeyuan" \
   -d '{"name": "pulan_default", "vector_size": 1024}'
 
 # 方式二：直接通过 Qdrant API 创建（Qdrant 容器内部，注意这里写死下划线名）
@@ -225,7 +225,13 @@ ssh root@121.199.53.233 "docker exec \$(docker ps --filter name=qdrant -q) curl 
 ssh root@121.199.53.233 "docker exec \$(docker ps --filter name=qdrant -q) curl http://localhost:6333/collections/pulan_default"
 ```
 
-> 生产环境 `.env.production` 中 `ROLE_COLLECTIONS` 已配置为 `{"普兰": "pulan_default"}`，RAG 检索将限定在该 collection 内。即使你误写成 `["pulan-default"]`（连字符）或 `["pulan default"]`（带空格），服务端会在检索前自动规范化到 `pulan_default`，不会 404。
+> 生产环境 `.env.production` 中 `ROLE_COLLECTIONS` 已配置为 `{"普兰": "pulan_*"}`，RAG 检索将自动覆盖所有以 `pulan_` 为前缀的 collection（例如 `pulan_default`、`pulan_kb_001`）。新建知识库集合时**必须以 `pulan_` 为前缀**（如 `pulan_<业务名>`），否则不会被 RAG 自动检索到。
+>
+> **集合名必须以 `pulan_` 开头的约束**：
+> - 后端 RAG 检索使用 `pulan_*` 通配语义，仅命中以 `pulan_` 为前缀的集合
+> - admin.html 已在 UI 层强制校验，非 `pulan_` 前缀的集合名将被拒绝创建
+> - 即使你误写成 `["pulan-default"]`（连字符）或 `["pulan default"]`（带空格），服务端会在检索前自动规范化到 `pulan_default`，不会 404
+> - 如需搜索所有 collection（不限前缀），可将 `ROLE_COLLECTIONS` 改为 `{"普兰": "*"}`
 
 ### 步骤 8：申请 SSL 证书
 

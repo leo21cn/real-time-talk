@@ -30,7 +30,7 @@
 首次访问管理页面时需要输入管理员 Token 进行身份验证：
 
 1. 打开 `http://localhost/admin.html`，看到 Token 输入界面
-2. 输入管理员 Token（默认值：`km-tk-111111`，可在 `.env` 中通过 `KNOWLEDGE_ADMIN_TOKEN` 修改）
+2. 输入管理员 Token（默认值：`shleeyuan`，可在 `.env` 中通过 `KNOWLEDGE_ADMIN_TOKEN` 修改）
 3. 点击「验证」，成功后进入管理界面
 4. Token 验证通过后会保存在浏览器本地，下次访问无需重新输入
 5. 点击右上角「退出登录」可清除 Token
