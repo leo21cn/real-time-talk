@@ -30,6 +30,9 @@ class AvatarConfig(BaseModel):
     speaker: str = "short-hair-teacher-girl"
     clips_dir: str = "clips/short-hair-teacher-girl"
     idle_animation: str = "clips/short-hair-teacher-girl/idle/idle_breathing.webm"
+    # 切片资源版本号：客户端预缓存按此版本号生成 URL ?v=N
+    # 发布新切片时 bump 此字段（同步 config.json 与服务端环境变量 AVATAR_CLIP_VERSION）
+    clip_version: int = 10
 
 
 class RedisConfig(BaseModel):
@@ -217,6 +220,7 @@ def load_config() -> dict:
             "speaker": json_cfg.get("avatar", {}).get("speaker", "short-hair-teacher-girl"),
             "clips_dir": json_cfg.get("avatar", {}).get("clips_dir", "clips/short-hair-teacher-girl"),
             "idle_animation": json_cfg.get("avatar", {}).get("idle_animation", "clips/short-hair-teacher-girl/idle/idle_breathing.webm"),
+            "clip_version": int(json_cfg.get("avatar", {}).get("clip_version", 10)),
         },
         "system_prompt": json_cfg.get("system_prompt", "") or _load_default_system_prompt(),
         "redis": {

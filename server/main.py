@@ -23,6 +23,7 @@ from server.api.routes_clips import router as clips_router
 from server.api.routes_media import router as media_router
 from server.api.routes_knowledge import router as knowledge_router, init_knowledge_routes
 from server.api.routes_asr import router as asr_router
+from server.api.routes_diag import router as diag_router
 from server.api.ws_handler import WsHandler
 
 # 日志配置
@@ -133,6 +134,7 @@ app.include_router(clips_router)
 app.include_router(media_router)
 app.include_router(knowledge_router)
 app.include_router(asr_router)
+app.include_router(diag_router)
 
 
 @app.get("/api/health")

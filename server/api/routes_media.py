@@ -29,6 +29,13 @@ async def get_media(session_token: str, filename: str):
     """
     object_name = f"sessions/{session_token}/{filename}"
 
+    # V18: 段视频 URL 现在包含 seq 参数（每轮对话唯一），浏览器缓存在同轮内有效。
+    # 使用 ETag/Last-Modified 替代 immutable，避免旧轮视频被错误复用。
+    cache_headers = {
+        "Cache-Control": "public, max-age=3600",
+        "Accept-Ranges": "bytes",
+    }
+
     # 优先尝试本地文件（避免 MinIO presigned URL 在浏览器不可达）
     # 视频拼接输出为 output_X.webm，直接匹配请求的 segment_X.webm
     work_dir = Path(f"_work/{session_token}")
@@ -39,6 +46,7 @@ async def get_media(session_token: str, filename: str):
         return FileResponse(
             str(local_path),
             media_type=media_type,
+            headers=cache_headers,
         )
 
     # 也尝试原始文件名
@@ -48,6 +56,7 @@ async def get_media(session_token: str, filename: str):
         return FileResponse(
             str(alt_path),
             media_type=media_type,
+            headers=cache_headers,
         )
 
     # 回退：尝试 MinIO presigned URL

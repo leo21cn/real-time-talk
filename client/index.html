@@ -14,6 +14,30 @@
     <meta name="format-detection" content="telephone=no, email=no, address=no" />
     <title>普兰 - 项目管理问询助理</title>
     <link rel="icon" type="image/png" href="/favicon.png" />
+
+    <!-- 微信/QQ/社交分享卡片元数据：微信爬虫优先读取 og:image 作为转发卡片缩略图 -->
+    <meta name="description" content="普兰 - 项目管理问询助理，为项目团队提供智能问询与流程协助。" />
+    <meta name="keywords" content="普兰,项目管理,智能助理,RAG,问询" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="普兰 - 项目管理问询助理" />
+    <meta property="og:description" content="为项目团队提供智能问询与流程协助" />
+    <meta property="og:image" content="https://pulan.smartmoves.com.cn/pulan-logo.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:url" content="https://pulan.smartmoves.com.cn/" />
+    <meta property="og:site_name" content="普兰" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://pulan.smartmoves.com.cn/pulan-logo.png" />
+    <meta itemprop="image" content="https://pulan.smartmoves.com.cn/pulan-logo.png" />
+
+    <!-- V2: 预加载最常用的 4 个视频资源，让浏览器在 HTML 解析完成后立即开始 HTTP 拉取。
+         微信浏览器首次进页面时即可并行预取，不受 video.play() 需用户交互的限制。
+         SW 拦截后这些 preload 请求会被缓存，后续 <video> 元素请求命中 0 网络往返。 -->
+    <link rel="preload" as="video" href="/api/clips/idle/idle_breathing.webm?v=10" crossorigin="anonymous">
+    <link rel="preload" as="video" href="/api/clips/idle/idle_breathing.mp4?v=10" crossorigin="anonymous">
+    <link rel="preload" as="video" href="/api/clips/greeting.webm?v=10" crossorigin="anonymous">
+    <link rel="preload" as="video" href="/api/clips/greeting.mp4?v=10" crossorigin="anonymous">
     <style>
       * {
         margin: 0;
@@ -34,6 +58,10 @@
       @keyframes typingBounce {
         from { opacity: 0.3; transform: translateY(0); }
         to { opacity: 1; transform: translateY(-4px); }
+      }
+      @keyframes typingBlink {
+        0%, 50% { opacity: 1; }
+        51%, 100% { opacity: 0; }
       }
     </style>
   </head>

@@ -35,6 +35,11 @@ class SessionContext:
     # WebSocket 引用（用于服务端主动关闭）
     ws: Optional[object] = None
 
+    # V17: 用户消息序号，每次收到 user_message 自增。
+    # 用于在所有 push event 中携带，客户端根据此丢弃旧消息的残留 segment_ready
+    # （避免 R1 取消后未发出的 segment_ready 被误认为 R2 的段）。
+    msg_seq: int = 0
+
     def is_active(self) -> bool:
         """检查会话是否处于活跃状态（非 idle）"""
         return self.state != SessionState.IDLE

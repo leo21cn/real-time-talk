@@ -192,6 +192,46 @@
 | **测试步骤** | 1. 调用 `GET /api/clips/idle/idle_breathing.webm` |
 | **预期结果** | HTTP 200；Content-Type: `video/webm` |
 
+#### TC-API-016：获取切片清单 manifest
+
+| 字段 | 内容 |
+|------|------|
+| **优先级** | P0 |
+| **前置条件** | 切片预转换完成 |
+| **测试步骤** | 1. 调用 `GET /api/clips/manifest` |
+| **预期结果** | HTTP 200；Body 为 JSON，包含 `items`（24 个 URL，含 12 切片 × 2 格式）和 `version`（与 `config.json` 的 `avatar.clip_version` 一致）；响应头 `Cache-Control: no-cache, no-store, must-revalidate` |
+| **验证点** | items 数量为 24，URL 携带 `?v=N` 版本号 |
+
+#### TC-API-017：切片响应头为长缓存
+
+| 字段 | 内容 |
+|------|------|
+| **优先级** | P0 |
+| **前置条件** | 切片文件存在 |
+| **测试步骤** | 1. 调用 `GET /api/clips/greeting.mp4`；2. 检查响应头 |
+| **预期结果** | HTTP 200；`Cache-Control: public, max-age=31536000, immutable`；响应头不包含 `Pragma` 或 `Expires` |
+| **验证点** | 与 L1 HTTP 缓存层一致 |
+
+#### TC-CACHE-001：客户端预取完成后 IndexedDB 中存有 24 条记录
+
+| 字段 | 内容 |
+|------|------|
+| **优先级** | P0 |
+| **前置条件** | 桌面端 Chrome DevTools 可用 |
+| **测试步骤** | 1. 首次访问页面；2. 点击“与普兰对话”解锁；3. 等待 5 秒；4. DevTools → Application → IndexedDB → `real-time-talk-clips` |
+| **预期结果** | object store `clips` 中至少 24 条记录（greeting/.../thanks/idle_breathing × .mp4/.webm）；每条记录的 `blob.size` 与服务端资源大小一致 |
+| **验证点** | 预取 Hook 返回 `ok >= 24`，无 `fail` |
+
+#### TC-CACHE-002：弱网下段间切换停顿消失
+
+| 字段 | 内容 |
+|------|------|
+| **优先级** | P0 |
+| **前置条件** | 已完成 TC-CACHE-001（缓存已预热） |
+| **测试步骤** | 1. DevTools → Network Throttling: Slow 3G；2. 发送一条需要 5 段语音回复的提问；3. 观察 AvatarView 段间停顿 |
+| **预期结果** | 5 段连续对话的段间切换 P95 < 200ms；DevTools Network 面板不出现 `/api/clips/{name}.mp4` 请求（全部命中 IndexedDB） |
+| **验证点** | NFR-CACHE-2 / NFR-CACHE-3 |
+
 ---
 
 ### 2.5 GET /api/media/{session_token}/{filename}

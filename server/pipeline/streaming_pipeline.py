@@ -32,6 +32,7 @@ class StreamingPipeline:
         ws: WebSocket,
         generator: SegmentGenerator,
         splitter: SegmentSplitter,
+        msg_seq: int = 0,
     ):
         self.session_id = session_id
         self.ws = ws
@@ -40,6 +41,8 @@ class StreamingPipeline:
         self._cancel = asyncio.Event()
         self._ack_queue: asyncio.Queue = asyncio.Queue()
         self._current_segment_index = 0
+        # V17: 记录当前消息序号，在所有推送事件中携带。客户端据此丢弃旧会话的残留事件。
+        self.msg_seq = msg_seq
 
     async def run(self, full_reply_text: str) -> None:
         """
@@ -75,6 +78,19 @@ class StreamingPipeline:
                 )
                 tasks.append(task)
 
+            # V6: 启动所有段生成任务后，立即 push segment_pending(0..N-1) 给客户端
+            # 客户端会立即启动预加载 fetch（带重试），与段生成并行。
+            # 当段 0 ready 时客户端已经 fetch 了段 1+ 全部；段 0 视频播完时
+            # buffer 中后续段已经就绪，video-ended 后从 buffer 立即切换。
+            # 这是 HLS/DASH 风格的 sliding buffer 机制。
+            for seg in segments:
+                pending_url = f"/api/media/{self.session_id}/segment_{seg.index}.webm?seq={self.msg_seq}"
+                await self._push_event({
+                    "type": "segment_pending",
+                    "index": seg.index,
+                    "video_url": pending_url,
+                })
+
             # Step 3: 等待首段完成 → 立即推送（后续段继续并行生成）
             first_result = await tasks[0]
 
@@ -93,16 +109,17 @@ class StreamingPipeline:
             await self._push_segment(0, first_result)
             await self._push_event({"type": "state_change", "state": "speaking"})
 
-            # Step 4: 逐段确认式推送后续（段间等待 ack，此时后续段已在后台生成）
+            # Step 4: 按 index 顺序推送后续段（不等 ack，段 ready 后立即 push）
+            # V4 优化：不等客户端 ack，消除“ack 到达后等段生成”的间隔。
+            # 客户端会在收到 segment_ready 后预下载下一段视频（blob），
+            # 段 i 视频 ended 后从预加载缓存切换，无停顿。
             for i in range(1, len(tasks)):
                 if self._cancel.is_set():
                     break
 
-                # 等待前端 ack_played
-                ack = await self._wait_for_ack()
-                if ack == "cancel" or self._cancel.is_set():
-                    break
-
+                # 直接等段 i 生成（不等 ack）
+                # 如果 tasks[i] 已在 Step 2 启动，这里可能已 ready，
+                # await 会立即返回，push 动作只在 ack 后。
                 result = await tasks[i]
 
                 if self._cancel.is_set():
@@ -116,6 +133,7 @@ class StreamingPipeline:
                     await self._push_error(result.error)
                     break
 
+                # 立即 push（不等 ack）— 客户端会预加载下一段
                 await self._push_segment(i, result)
 
             # Step 5: 全部完成 → 回到待机
@@ -130,12 +148,19 @@ class StreamingPipeline:
             await self._push_event({"type": "state_change", "state": "idle"})
 
     async def _push_segment(self, index: int, result: SegmentResult) -> None:
-        """推送段落就绪事件 + 打字机气泡"""
+        """
+        推送段落就绪事件。
+
+        V8: 不再逐字推送 bubble_char。打字机效果由客户端本地动画实现
+        （useTypingAnimation 按 duration_ms * 60% 推进 displayedLen），
+        消除 WebSocket 串行推送造成的卡通形象与文字不同步。
+        """
         try:
             # 使用 API 代理路径（避免 MinIO presigned URL 在浏览器不可达）
-            video_url = f"/api/media/{self.session_id}/segment_{index}.webm"
+            # V18: 添加 seq 参数区分不同轮对话，避免浏览器/IndexedDB 缓存碰撞
+            video_url = f"/api/media/{self.session_id}/segment_{index}.webm?seq={self.msg_seq}"
 
-            # 推送 segment_ready 事件
+            # 一次性推送 segment_ready（含完整 text + duration_ms）
             await self._push_event({
                 "type": "segment_ready",
                 "index": index,
@@ -144,27 +169,8 @@ class StreamingPipeline:
                 "text": result.text,
             })
 
-            # 打字机效果：按字符逐字推送
-            if result.text and result.duration_ms > 0:
-                # 限定总打字时间不超过视频时长的 60%，单字间隔 15ms~50ms
-                max_typing_sec = result.duration_ms * 0.6 / 1000
-                raw_interval = max_typing_sec / len(result.text)
-                char_interval = min(raw_interval, 0.05)  # 单字最大 50ms
-                for char in result.text:
-                    if self._cancel.is_set():
-                        break
-                    await self._push_event({
-                        "type": "bubble_char",
-                        "char": char,
-                        "segment_index": index,
-                    })
-                    await asyncio.sleep(max(char_interval, 0.015))  # 最少 15ms 间隔
-
-                # 推送气泡消失
-                await self._push_event({
-                    "type": "bubble_dismiss",
-                    "segment_index": index,
-                })
+            # V8 移除：bubble_char / bubble_dismiss 串行推送循环
+            # 客户端 useTypingAnimation 会根据 duration_ms 自动推进 displayedLen
 
         except Exception as e:
             logger.error(f"推送段落 {index} 失败: {e}")
@@ -184,6 +190,8 @@ class StreamingPipeline:
 
     async def _push_event(self, event: dict) -> None:
         """推送事件到 WebSocket"""
+        # V17: 所有推送事件携带 msg_seq，客户端据此过滤旧会话的残留事件。
+        event["msg_seq"] = self.msg_seq
         try:
             await self.ws.send_json(event)
         except Exception:

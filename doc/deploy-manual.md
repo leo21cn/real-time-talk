@@ -390,6 +390,21 @@ scp $deployDir\real-time-talk-predeploy.tar root@121.199.53.233:/root/
 ssh root@121.199.53.233 "docker load -i /root/real-time-talk-predeploy.tar; docker service update --force real-time-talk_server"
 ```
 
+### 4.1 重新生成切片后的版本号 bump
+
+`/api/clips/` 路由已启用 long-lived cache（`Cache-Control: public, max-age=31536000, immutable`）。发布新切片时**必须**同步 bump `config.json` 中的 `avatar.clip_version` 字段（与 `server/config.py` 中 `AvatarConfig.clip_version` 默认值一致），否则客户端将使用旧缓存看不到新动画。
+
+```powershell
+# 1. 修改 config.json 的 avatar.clip_version（如 8 → 9）
+# 2. 重新上传配置
+scp config.json root@121.199.53.233:/root/real-time-talk/
+ssh root@121.199.53.233 "cp /root/real-time-talk/config.json /opt/real-time-talk/config.json"
+# 3. 重启服务以使新 clip_version 生效
+ssh root@121.199.53.233 "docker service update --force real-time-talk_server"
+```
+
+发布后客户端会通过 `GET /api/clips/manifest` 自动获取新版本号，IndexedDB 中的旧缓存因 URL 中的 `?v=N` 不再匹配会被丢弃并重新下载。
+
 ---
 
 ## 5. 回滚

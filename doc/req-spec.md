@@ -260,6 +260,14 @@ RealTimeTalk 是一款 **Web 应用**，以卡通形象（speaker-short-hair-tea
 - 过渡规则：遵循 `clips.toml` 中定义的 opening → body → closing 自然过渡序列，LLM 输出的标签序列需经过滤/重排以确保合法过渡
 - 拼接方式：运行时使用 FFmpeg stream copy（流拷贝）拼接已预转码的 WebM VP9 Alpha 切片，仅混音时对音频重编码，避免视频重编码开销
 
+#### 3.2.4 客户端预缓存（NFR）
+
+- **NFR-CACHE-1**：首次访问解锁后，所有 12 个语义切片 + idle/analysis 共约 24 个资源（mp4 + webm）须在 10 秒内进入客户端缓存。
+- **NFR-CACHE-2**：二次访问段间切换的“加载等待时间”应小于 100ms（P95）。
+- **NFR-CACHE-3**：在 Slow 3G 模拟下，5 段连续对话的段间停顿不应超过 200ms。
+- **NFR-CACHE-4**：缓存版本号变更（`?v=N` bump）须在 24h 内由后端 `clip_version` 字段自动下发到客户端，强制重建缓存。
+- **NFR-CACHE-5**：预取过程不能阻塞首屏渲染与用户交互；任意单条 URL 预取失败不能影响其他资源。
+
 #### 3.2.3 语义分析流程
 
 1. 大模型分析当前段落文本的语义结构。

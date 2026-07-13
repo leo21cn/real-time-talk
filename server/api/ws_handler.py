@@ -145,6 +145,15 @@ class WsHandler:
             session_ctx.pipeline.cancel()
             session_ctx.pipeline = None
 
+        # V17: 自增 msg_seq（唯一标识当前 user_message），并先推送一个 session_reset
+        # 事件携带新 seq。客户端按 msg_seq 过滤旧会话的残留事件（避免取消后还未
+        # 发送出的 R1 segment_ready 被误认为 R2 的段）。
+        session_ctx.msg_seq += 1
+        await ws.send_json({
+            "type": "session_reset",
+            "msg_seq": session_ctx.msg_seq,
+        })
+
         # 更新状态
         session_ctx.state = SessionState.THINKING
         await self.redis.set_session_state(session_ctx.token, "thinking")
@@ -172,13 +181,14 @@ class WsHandler:
         concat = VideoConcat()
         generator = SegmentGenerator(tts, semantic, concat, self.minio)
 
-        # 创建 pipeline（用于 ack 管理和推送）
+        # 创建 pipeline（用于 ack 管理和推送），传入当前 msg_seq
         splitter = SegmentSplitter()
         pipeline = StreamingPipeline(
             session_id=session_ctx.token,
             ws=ws,
             generator=generator,
             splitter=splitter,
+            msg_seq=session_ctx.msg_seq,
         )
         session_ctx.pipeline = pipeline
 
@@ -303,13 +313,10 @@ class WsHandler:
             await pipeline._push_segment(first_idx, first_result)
             await ws.send_json({"type": "state_change", "state": "speaking"})
 
-            # Step 6: 逐段确认式推送
+            # Step 6: 后续段直接推送（不等 ack）。与 streaming_pipeline.run() V4 优化一致：
+            # 段生成完毕后立即推送，客户端自行管理视频播放列表，消除 ack 串行等待延迟。
             for i in range(1, len(pending_tasks)):
                 if pipeline._cancel.is_set():
-                    break
-
-                ack = await pipeline._wait_for_ack()
-                if ack == "cancel" or pipeline._cancel.is_set():
                     break
 
                 idx, task = pending_tasks[i]
@@ -329,6 +336,7 @@ class WsHandler:
 
             # Step 7: 全部完成
             if not pipeline._cancel.is_set():
+                await ws.send_json({"type": "response_complete", "total_segments": len(pending_tasks)})
                 await ws.send_json({"type": "all_completed"})
                 await ws.send_json({"type": "return_to_idle"})
                 await ws.send_json({"type": "state_change", "state": "idle"})

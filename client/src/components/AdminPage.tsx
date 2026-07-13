@@ -6,6 +6,7 @@
  * - 调试搜索
  */
 import { useState, useEffect, useCallback } from 'react';
+import CacheStatusPanel from './CacheStatusPanel';
 
 interface CollectionInfo {
   name: string;
@@ -364,6 +365,32 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       {/* 主内容区 */}
       <div style={{ flex: 1, overflow: 'auto', padding: '24px', maxWidth: 800, margin: '0 auto', width: '100%' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+          {/* 客户端缓存诊断（V2） */}
+          <details
+            style={{
+              background: '#FFF',
+              borderRadius: 8,
+              border: '1px solid #e8e8e8',
+              padding: '0 20px',
+            }}
+          >
+            <summary
+              style={{
+                cursor: 'pointer',
+                padding: '14px 0',
+                fontSize: 15,
+                fontWeight: 600,
+                color: '#333',
+                listStyle: 'none',
+              }}
+            >
+              客户端缓存诊断（V2）
+            </summary>
+            <div style={{ paddingBottom: 16 }}>
+              <CacheStatusPanel />
+            </div>
+          </details>
+
           {/* 集合管理区 */}
           <section style={{ background: '#FFF', borderRadius: 8, padding: '20px 24px', border: '1px solid #e8e8e8' }}>
             <h2 style={{ fontSize: 15, fontWeight: 600, margin: '0 0 16px', color: '#333' }}>集合管理</h2>

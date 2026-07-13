@@ -436,6 +436,32 @@ App
 - 页面背景为 `#FFFFFF`，形象视频通过 alpha 通道叠加
 - 视频切换：监听 `ended` 事件，切换 `<video>` 的 `src` 属性
 
+#### 3.5.4 客户端视频预缓存（v2.x）
+
+为解决微信浏览器（尤其弱网）下段间停顿 1–3s 的问题，引入两层缓存：
+
+- **L1 HTTP 缓存**：FastAPI `/api/clips/*` 响应头改为 `Cache-Control: public, max-age=31536000, immutable`；URL 携带 `?v=N` 版本号，发布新切片时 bump 版本触发浏览器重新拉取。
+- **L2 IndexedDB Blob 缓存**：客户端 `clipCache` 服务以 URL 为 key 存储 Blob；命中后 `URL.createObjectURL` 直接赋给 `<video src>`，避免再次网络请求。
+
+**服务清单**：
+- 服务端：`server/api/routes_clips.py` 暴露 `GET /api/clips/manifest` 返回预取 URL 列表（含版本号，manifest 本身不缓存）。
+- 客户端：
+  - `client/src/services/clipCache.ts`：IndexedDB Blob 封装。
+  - `client/src/hooks/useClipPreloader.ts`：预取调度。
+  - `client/src/components/AvatarView.tsx`：`resolveVideoSrc()` + `assignVideoSrc()` 在 `*.src` 赋值前尝试命中缓存。
+- 触发点：`client/src/App.tsx` 中 `onFirstTap` 解锁后调用 `prefetchOnUnlock()`，4 路并发下载，不阻塞首屏。桌面端在组件挂载后延迟 500ms 启动预取。
+
+**`AvatarView` 改造要点**：
+- `play` / `playLoop` 改为 `async`，先 `await resolveVideoSrc(url)` 拿到 objectURL 再传入 `showMain` / `showLoop`。
+- 通过 `mainObjectUrlRef` / `loopObjectUrlRef` 跟踪当前为每个 `<video>` 分配的 objectURL；`assignVideoSrc` 在赋值前自动 revoke 旧 objectURL，避免内存泄露。
+- 视频元素显式 `removeAttribute('src')` / `src = ''` 时同步调用 `releaseVideoSrc(target)` 释放追踪的 objectURL。
+- 任何缓存层失败回退到原始 URL，行为与现状一致。
+
+**兼容性**：
+- IndexedDB / `URL.createObjectURL` 在微信内置浏览器各版本均可用。
+- 切片总量约 2.5–3 MB，远低于微信单 origin 配额（≥50 MB）。
+- L1 HTTP 缓存在所有浏览器原生生效（包括 WeChat 旧版本），即使 L2 不可用也能避免重复下载。
+
 ### 3.6 输入校验
 
 - 空消息：前端拦截，不允许发送（WebSocket 不发送 user_message）

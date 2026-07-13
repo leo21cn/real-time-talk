@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from server.config import get_config
 
@@ -13,11 +13,56 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/clips", tags=["clips"])
 
+# 预取目标：12 个语义切片 + 待机动画，mp4 与 webm 各一份
+# 同步 clips.toml（clips/short-hair-teacher-girl/clips.toml）中的 [clips.*]
+PRELOAD_CLIP_NAMES = [
+    "greeting",
+    "introduction",
+    "explaining",
+    "listing",
+    "emphasis",
+    "example",
+    "analysis",
+    "comparison",
+    "transition",
+    "conclusion",
+    "thanks",
+    "idle/idle_breathing",
+]
+PRELOAD_FORMATS = (".mp4", ".webm")
+
 
 def _get_clips_dir() -> Path:
     """获取切片资源目录"""
     cfg = get_config()
     return Path(cfg["avatar"]["clips_dir"])
+
+
+@router.get("/manifest")
+async def clips_manifest():
+    """
+    返回所有预取目标 URL 列表（带版本号）。
+
+    客户端在首次解锁后调用本端点，按返回的 URL 列表并行下载到 IndexedDB。
+    URL 携带的 ?v=N 版本号与服务端 config.json 中 avatar.clip_version 联动，
+    发布新切片时 bump 版本号即可使客户端自动失效旧缓存并重新预取。
+    """
+    cfg = get_config()
+    base_version = int(cfg["avatar"].get("clip_version", 1))
+    items: list[str] = []
+    for name in PRELOAD_CLIP_NAMES:
+        for ext in PRELOAD_FORMATS:
+            items.append(f"/api/clips/{name}{ext}?v={base_version}")
+    return JSONResponse(
+        {
+            "items": items,
+            "version": base_version,
+        },
+        headers={
+            # manifest 本身不缓存：必须实时返回最新版本号
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+        },
+    )
 
 
 @router.get("/{name:path}")
@@ -75,9 +120,10 @@ async def get_clip(name: str):
                     str(resolved),
                     media_type=media_type,
                     headers={
-                        "Cache-Control": "no-cache, no-store, must-revalidate",
-                        "Pragma": "no-cache",
-                        "Expires": "0",
+                        # 长缓存：客户端预缓存机制依赖此头
+                        # URL 已携带 ?v=N 版本号，发布新切片时由 config.json 中
+                        # avatar.clip_version 字段统一 bump，浏览器自动失效旧缓存
+                        "Cache-Control": "public, max-age=31536000, immutable",
                     },
                 )
         except (OSError, ValueError):

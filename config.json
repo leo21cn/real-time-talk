@@ -13,7 +13,8 @@
   "avatar": {
     "speaker": "short-hair-teacher-girl",
     "clips_dir": "clips/short-hair-teacher-girl",
-    "idle_animation": "clips/short-hair-teacher-girl/idle/idle_breathing.webm"
+    "idle_animation": "clips/short-hair-teacher-girl/idle/idle_breathing.webm",
+    "clip_version": 10
   },
   "system_prompt": "",
   "redis": {

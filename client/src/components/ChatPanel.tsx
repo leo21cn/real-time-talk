@@ -165,6 +165,7 @@ export default function ChatPanel({ messages, onSend, disabled, isMobile = false
             role={msg.role}
             text={msg.text}
             isTyping={msg.isTyping}
+            displayedLen={msg.displayedLen}
           />
         ))}
       </div>
