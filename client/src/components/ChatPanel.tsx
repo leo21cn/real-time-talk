@@ -15,9 +15,11 @@ interface ChatPanelProps {
   disabled?: boolean;
   /** 是否为移动端布局（控制最小宽度与高度） */
   isMobile?: boolean;
+  /** V37: 微信移动端 — 隐藏录音按钮 */
+  isWeChatMobile?: boolean;
 }
 
-export default function ChatPanel({ messages, onSend, disabled, isMobile = false }: ChatPanelProps) {
+export default function ChatPanel({ messages, onSend, disabled, isMobile = false, isWeChatMobile = false }: ChatPanelProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -202,10 +204,13 @@ export default function ChatPanel({ messages, onSend, disabled, isMobile = false
             maxHeight: 120,
           }}
         />
-        <VoiceInputButton
-          onTranscribed={handleTranscribed}
-          disabled={disabled}
-        />
+        {/* V37: 微信移动端不显示录音按钮 */}
+        {!isWeChatMobile && (
+          <VoiceInputButton
+            onTranscribed={handleTranscribed}
+            disabled={disabled}
+          />
+        )}
         <button
           onClick={handleSend}
           disabled={disabled}

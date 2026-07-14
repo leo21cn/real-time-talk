@@ -33,6 +33,8 @@ export interface AvatarViewHandle {
   /** V12: 仅清理 blob/warmup/preload 缓存（不动 video 元素 src/opacity），
    * 在新会话开始时调用，避免上一轮的 stale blob URL 干扰下一轮 warmup */
   clearPreloadedBlobs: () => void;
+  /** V35: 在用户手势同步调用栈中预捕获播放权限，解锁 X5 自动播放策略 */
+  captureGesture: () => void;
 }
 
 interface AvatarViewProps {
@@ -46,6 +48,8 @@ interface AvatarViewProps {
   analysisMp4Src?: string;
   /** 是否为移动端布局（控制高度） */
   isMobile?: boolean;
+  /** V37: 微信移动端 — 不渲染视频，不播放动画与语音，只显示静态图 */
+  isWeChatMobile?: boolean;
 }
 
 const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
@@ -56,6 +60,7 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
       analysisSrc = '/api/clips/idle/idle_breathing.webm?v=11',
       analysisMp4Src = '/api/clips/idle/idle_breathing.mp4?v=11',
       isMobile = false,
+      isWeChatMobile = false,
     },
     ref
   ) {
@@ -80,6 +85,13 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
     const loopObjectUrlRef = useRef<string | null>(null);
     const mainOriginalUrlRef = useRef<string | null>(null);
     const loopOriginalUrlRef = useRef<string | null>(null);
+
+    // V35: 手势预捕获 — 记录最近一次用户交互时间戳
+    const lastGestureTsRef = useRef<number>(0);
+    // V35: play 失败计数 — 连续失败时显示轻触提示
+    const playFailCountRef = useRef<number>(0);
+    // V35: 轻触继续覆盖层 DOM 引用
+    const tapOverlayRef = useRef<HTMLDivElement | null>(null);
 
     // V4: 预下载缓存 — key 为原始 URL，value 为预创建的 objectURL。
     // segment_ready 后调用 preloadVideo 提前下载下一段视频，
@@ -131,22 +143,23 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
       ) => {
         const objRef = target === 'main' ? mainObjectUrlRef : loopObjectUrlRef;
         const origRef = target === 'main' ? mainOriginalUrlRef : loopOriginalUrlRef;
-        if (objRef.current && objRef.current !== resolvedUrl) {
-          try {
-            URL.revokeObjectURL(objRef.current);
-          } catch {
-            /* ignore */
-          }
-          objRef.current = null;
+        // V34: 先记录旧 blob URL，再设新 src，最后撤销旧 blob。
+        // 之前先 revoke 再设 src 的时序在 X5 内核上会导致：
+        // 视频元素在 revoke 后、新 src 赋值前的短暂窗口内持有已失效的 blob URL，
+        // 浏览器进入错误状态 → canplay 永不触发 → 视频白屏/卡顿。
+        const oldObjUrl = objRef.current;
+        // 1. 先设新 src（确保视频元素始终有有效 src，不会进入错误状态）
+        el.src = resolvedUrl;
+        // 2. 再撤销旧 blob URL（安全，视频元素已指向新 src）
+        if (oldObjUrl && oldObjUrl !== resolvedUrl) {
+          try { URL.revokeObjectURL(oldObjUrl); } catch { /* ignore */ }
         }
+        // 3. 更新跟踪引用
         const isObjectUrl = !!resolvedUrl && resolvedUrl.startsWith('blob:');
-        if (isObjectUrl) {
-          objRef.current = resolvedUrl;
-        }
+        objRef.current = isObjectUrl ? resolvedUrl : null;
         if (originalUrl !== undefined) {
           origRef.current = originalUrl;
         }
-        el.src = resolvedUrl;
       },
       [],
     );
@@ -189,9 +202,8 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
       if (!fallback || fallback === loopVideo.src) return;
       console.warn('[AvatarView] loopVideo 加载失败，尝试 mp4 fallback:', fallback);
       loopMp4TriedRef.current = true;
-      // 撤销当前可能持有的 objectURL，避免内存泄露
-      releaseVideoSrc('loop');
-      // fallback 也可能命中缓存，assignVideoSrc 会统一处理 objectURL 跟踪
+      // V34: assignVideoSrc 内部已正确处理旧 blob URL 撤销时序（先设新 src 再撤销旧 blob），
+      // 不再需要前置 releaseVideoSrc（避免 revoke 后短暂窗口内视频元素持有失效 blob URL）。
       resolveVideoSrc(fallback).then((resolved) => {
         assignVideoSrc(loopVideo, resolved, 'loop', fallback);
         loopVideo.load();
@@ -213,14 +225,89 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
         console.warn('[AvatarView] mainVideo objectURL 加载失败，回退到 HTTP:', originalSrc);
         mainMp4TriedRef.current = true;
         mainOriginalUrlRef.current = null;
-        releaseVideoSrc('main');
+        // V34: 先设新 src 再撤销旧 blob（与 assignVideoSrc 修复一致），
+        // 避免视频元素在 revoke 后的短暂窗口内持有失效 blob URL → X5 错误状态。
         mainVideo.src = originalSrc;
+        releaseVideoSrc('main');
         mainVideo.load();
       } else {
         console.warn('[AvatarView] mainVideo 加载失败:', currentSrc);
         mainMp4TriedRef.current = true;
       }
     }, [releaseVideoSrc]);
+
+    /**
+     * V35: 轻触继续覆盖层 — 当 play() 被 X5 自动播放策略阻止时，
+     * 显示半透明播放按钮，用户轻触后在 touchstart 同步调用栈中调用 play() 解锁。
+     */
+    const showTapToPlayOverlay = useCallback(() => {
+      // 移除已存在的覆盖层
+      if (tapOverlayRef.current) {
+        tapOverlayRef.current.remove();
+        tapOverlayRef.current = null;
+      }
+      // 找到容器（video 元素的父 div）
+      const mainVideo = mainVideoRef.current;
+      if (!mainVideo || !mainVideo.parentElement) return;
+      const container = mainVideo.parentElement;
+
+      const overlay = document.createElement('div');
+      overlay.style.cssText =
+        'position:absolute;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;' +
+        'background:rgba(0,0,0,0.15);cursor:pointer;transition:opacity 0.3s ease;';
+
+      // 播放按钮圆圈
+      const btn = document.createElement('div');
+      btn.style.cssText =
+        'width:56px;height:56px;border-radius:50%;background:rgba(255,255,255,0.9);' +
+        'display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.2);';
+
+      // 三角播放图标
+      const icon = document.createElement('div');
+      icon.style.cssText =
+        'width:0;height:0;border-left:22px solid #333;border-top:14px solid transparent;' +
+        'border-bottom:14px solid transparent;margin-left:4px;';
+      btn.appendChild(icon);
+      overlay.appendChild(btn);
+
+      // 提示文字
+      const label = document.createElement('div');
+      label.textContent = '轻触继续';
+      label.style.cssText =
+        'position:absolute;bottom:12px;left:0;right:0;text-align:center;' +
+        'color:#666;font-size:13px;font-family:sans-serif;';
+      overlay.appendChild(label);
+
+      // 轻触/点击处理 — 在同步调用栈中调用 play() 解锁 X5 自动播放
+      const handleTap = () => {
+        overlay.removeEventListener('click', handleTap);
+        overlay.removeEventListener('touchstart', handleTap);
+        // 找到当前可见的视频元素并播放
+        const activeEl = activeElementRef.current;
+        const videoEl = activeEl === 'main' ? mainVideoRef.current : loopVideoRef.current;
+        if (videoEl) {
+          videoEl.muted = true;
+          videoEl.play().then(() => {
+            videoEl.muted = false;
+          }).catch(() => {
+            // 仍然失败，静默移除覆盖层
+          });
+        }
+        playFailCountRef.current = 0;
+        overlay.style.opacity = '0';
+        setTimeout(() => {
+          overlay.remove();
+          if (tapOverlayRef.current === overlay) {
+            tapOverlayRef.current = null;
+          }
+        }, 300);
+      };
+      overlay.addEventListener('click', handleTap);
+      overlay.addEventListener('touchstart', handleTap, { passive: true });
+
+      container.appendChild(overlay);
+      tapOverlayRef.current = overlay;
+    }, []);
 
     /** 切换 src 时重置 mp4 fallback 状态 */
     const resetMp4Fallback = useCallback(() => {
@@ -286,12 +373,21 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
         if (mainReadyRef.current) return;
         mainReadyRef.current = true;
         clearMainSwitchTimer();
-
+      
+        // V33: 独立追踪 finalize 是否已被调用。
+        // 原设计完全依赖 play().then() 来触发 finalize，但在 X5 内核上
+        // play() 可能永远不 resolve 也不 reject（静默 pending），导致
+        // finalize 永不调用 → targetEl 不可见 → 卡通形象卡住不动。
+        // 用独立标志 + 超时兜底确保 finalize 最终一定被调用。
+        let finalizeCalled = false;
+      
         // V15 修复（移动端 4G/5G 段落间闪烁）：保留 currentEl 最后一帧作为桥接，
         // 等 targetEl 真正开始播放（playing 事件触发）后再涪出 currentEl，
         // 避免在 targetEl 还未解码出首帧时同时隐藏旧帧 + 显示空白帧。
         // 允底超时 300ms：autoplay 被阻止/解码极慢时强制涪出 currentEl。
         const finalize = () => {
+          if (finalizeCalled) return;
+          finalizeCalled = true;
           // targetEl 立即可见（如果它已可显示首帧，用户立即看到）
           targetEl.style.transition = 'none';
           targetEl.style.opacity = '1';
@@ -305,14 +401,12 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
               if (targetEl.currentTime > 0.05) {
                 targetEl.muted = false;
                 targetEl.removeEventListener('timeupdate', tryUnmute);
-              } else {
-                targetEl.addEventListener('timeupdate', tryUnmute);
               }
             };
             tryUnmute();
           }
           activeElementRef.current = currentActive === 'main' ? 'loop' : 'main';
-
+      
           // V15: currentEl 涪出策略
           const fadeOutCurrent = () => {
             currentEl.style.transition = 'opacity 0.15s ease';
@@ -346,44 +440,81 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
             setTimeout(onFirstFrame, 60);
           };
           targetEl.addEventListener('playing', onPlaying);
+          // V33: 如果 targetEl 已经在播放（playing 事件已过），通过 readyState 判断
+          if (targetEl.readyState >= 3 && !targetEl.paused && targetEl.currentTime > 0) {
+            setTimeout(onFirstFrame, 60);
+          }
           // 兑底2：硬超时 1500ms（原 300ms 不足以覆盖 5G 慢解码）
           const hardFallback = window.setTimeout(() => {
             targetEl.removeEventListener('playing', onPlaying);
             onFirstFrame();
           }, 1500);
         };
-
+      
         // V13 修复：play() 可能被自动播放策略阻止（尤其当用户点击发送后一段时间才到下一段），
-        // 这里采用“重试降级”策略：play() 失败后先 unmute 再重试（muted autoplay 通常不被拒，
+        // 这里采用"重试降级"策略：play() 失败后先 unmute 再重试（muted autoplay 通常不被拒，
         // 但有时会与之前的 unmute 状态冲突）；最终失败时保持 muted + 静态帧（V11 逻辑）。
+        // V33 修复：增加 Promise.race 超时（2000ms），解决 X5 内核 play() 静默 pending 问题。
+        const PLAY_TIMEOUT_MS = 2000;
         const attemptPlay = (attempt: number): void => {
           // 第一次 muted 试播（Chrome / Safari 均允许 muted autoplay）
           if (attempt === 1) {
             targetEl.muted = true;
           }
-          targetEl.play().then(() => {
+      
+          // V33: 用 Promise.race 包装 play()，防止 X5 内核上永远 pending
+          const playPromise = targetEl.play();
+          const timeoutPromise = new Promise<void>((_, reject) =>
+            setTimeout(() => reject(new Error('play() timeout')), PLAY_TIMEOUT_MS)
+          );
+      
+          Promise.race([playPromise, timeoutPromise]).then(() => {
             finalize();
           }).catch((err) => {
-            if (attempt === 1) {
-              // 第二次重试：保持 muted 但重新加载源（某些浏览器需要重新 load 才能修复状态）
-              console.warn('play() 被阻止 (attempt 1)，重试中...:', err.name);
-              try { targetEl.load(); } catch { /* ignore */ }
-              window.setTimeout(() => attemptPlay(2), 80);
-            } else if (attempt === 2) {
-              // 第三次重试：延迟 200ms（希望用户手势上下文重新生效）
-              console.warn('play() 被阻止 (attempt 2)，延迟重试:', err.name);
-              window.setTimeout(() => attemptPlay(3), 200);
+            const errMsg = (err as any)?.message || (err as any)?.name || 'unknown';
+            if (attempt <= 2) {
+              // 重试策略：attempt 1 等 80ms，attempt 2 等 200ms
+              const retryDelay = attempt === 1 ? 80 : 200;
+              console.warn(`play() 被阻止/超时 (attempt ${attempt})，${retryDelay}ms后重试:`, errMsg);
+              if (attempt === 1) {
+                try { targetEl.load(); } catch { /* ignore */ }
+              }
+              window.setTimeout(() => attemptPlay(attempt + 1), retryDelay);
             } else {
-              // 最终失败：保持 muted + 显示首帧（V11 降级逻辑）
-              console.warn('play() 最终失败，降级切换（保持 muted）:', err.name);
+              // V33: 最终兜底 — 无论如何都调 finalize，确保 targetEl 可见
+              console.warn('play() 最终失败/超时，降级切换（保持 muted）:', errMsg);
               finalize();
+              // V35: play 被 X5 自动播放策略阻止 → 显示轻触继续覆盖层
+              // 用户轻触后在 touchstart 同步调用栈中调用 play() 解锁
+              playFailCountRef.current++;
+              if (targetEl.paused) {
+                window.setTimeout(() => showTapToPlayOverlay(), 100);
+              }
             }
           });
         };
         attemptPlay(1);
+      
+        // V33: 额外硬兜底 — 6000ms 后如果 finalize 还没被调，强制调用。
+        // 覆盖极端情况：attemptPlay 3 次重试（≈2280ms）+ 余量。
+        // 原 5000ms 在 showMain 层检查 mainReadyRef（已被设 true → 失效），
+        // 这里新增独立兜底不依赖任何状态标志。
+        mainSwitchTimerRef.current = window.setTimeout(() => {
+          if (!finalizeCalled) {
+            console.warn('[AvatarView] 6000ms 硬兜底：finalize 未触发，强制切视频');
+            // 最后一次尝试 muted play（不依赖 Promise）
+            try { targetEl.muted = true; targetEl.play().catch(() => {}); } catch { /* ignore */ }
+            finalize();
+          }
+        }, 6000);
       };
 
       // 预加载新段到目标元素（先尝试 IndexedDB 命中 → objectURL，避免回源）
+      // V34: assignVideoSrc 已修复 blob URL 时序（先设新 src 再撤销旧 blob），
+      // 标准浏览器设置 el.src 后自动触发隐式 load()，无需手动调用。
+      // V35 手势预捕获刷新已移除：在 PC 标准浏览器上，play() 会先播放旧内容再被
+      // assignVideoSrc 中断，导致新 src 的 canplay 时序被打乱引起卡顿。
+      // X5 自动播放解锁完全依赖 captureGesture（handleSend 中同步调用），不再此处刷新。
       assignVideoSrc(
         targetEl,
         url,
@@ -444,6 +575,7 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
       if (!mainVideo || !loopVideo) return;
 
       clearLoopSwitchTimer();
+      clearMainSwitchTimer(); // V34: 清理 showMain 残留的硬兜底定时器，防止在新一轮 showLoop 期间误触发
       // V25: 清理上一次的桥接涪出兑底定时器
       if (bridgeFadeTimerRef.current) {
         window.clearTimeout(bridgeFadeTimerRef.current);
@@ -749,7 +881,25 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
     }, [clearLoopSwitchTimer, clearMainSrcClearTimer, assignVideoSrc, releaseVideoSrc]);
 
     // 暴露方法给父组件
-    useImperativeHandle(ref, () => ({
+    // V37: 微信移动端 → 所有方法都是 no-op，不依赖任何视频元素
+    useImperativeHandle(ref, () => {
+      if (isWeChatMobile) {
+        return {
+          play: () => { /* no-op: 微信端不播放动画 */ },
+          playLoop: () => { /* no-op: 微信端不播放动画 */ },
+          stop: () => { /* no-op */ },
+          reset: () => { /* no-op */ },
+          isPlaying: () => false,
+          getVideoElement: () => null,
+          preloadVideo: () => { /* no-op */ },
+          consumePreloadedBlob: () => null,
+          preloadVideoAsync: async () => null,
+          warmupVideoElement: async () => { /* no-op */ },
+          clearPreloadedBlobs: () => { /* no-op */ },
+          captureGesture: () => { /* no-op: 微信端不需要解锁自动播放 */ },
+        };
+      }
+      return ({
       async play(url: string) {
         const loopVideo = loopVideoRef.current;
         if (!loopVideo) return;
@@ -1050,7 +1200,7 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
         // 仅清 Map（不 revoke 对象 URL），避免中断当前 video 元素正在使用的 blob。
         // 新会话的 preloadVideoAsync 会重新创建 blob 并写入 Map。
         preloadedBlobsRef.current.clear();
-        // 清 warmup 状态：防止对老 blobUrl 走“已解码完成”快速路径
+        // 清 warmup 状态：防止对老 blobUrl 走"已解码完成"快速路径
         warmupMapRef.current.clear();
         warmupPromiseMapRef.current.clear();
         // 清 pending retry 集合
@@ -1058,7 +1208,24 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
           preloadPendingRef.current.clear();
         }
       },
-    }), [showMain, showLoop, resetMp4Fallback, resolveVideoSrc, releaseVideoSrc, assignVideoSrc]);
+    
+      // V35: 手势预捕获 — 在用户手势（click/touchstart）同步调用栈中调用，
+      // 对两个 video 元素执行 muted play()→pause() 以解锁 X5 自动播放策略。
+      // 浏览器将手势 token 关联到页面/元素，后续 WebSocket 回调中的 play() 更可能成功。
+      captureGesture() {
+        lastGestureTsRef.current = Date.now();
+        [mainVideoRef.current, loopVideoRef.current].forEach((el) => {
+          if (!el) return;
+          el.muted = true;
+          const p = el.play();
+          if (p && typeof p.then === 'function') {
+            p.then(() => {
+              el.pause();
+            }).catch(() => { /* 预捕获失败不影响后续流程 */ });
+          }
+        });
+      },
+    })}, [isWeChatMobile, showMain, showLoop, resetMp4Fallback, resolveVideoSrc, releaseVideoSrc, assignVideoSrc]);
 
     // 主视频播放完毕回调
     const onMainEnded = useCallback(() => {
@@ -1150,9 +1317,9 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
       <div
         style={{
           position: 'relative',
-          // 移动端：上方区域占 32vh（留下空间给聊天面板）
+          // V37 微信移动端：高度从 32vh 缩小到 20vh（静态图不需要太大）
           // 桌面端：75vh，靠 aspectRatio 9/16 自动算宽度
-          height: isMobile ? '32vh' : '75vh',
+          height: isWeChatMobile ? '20vh' : (isMobile ? '32vh' : '75vh'),
           maxHeight: '100%',
           aspectRatio: '9 / 16',
           maxWidth: '100%',
@@ -1162,49 +1329,82 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
           alignSelf: isMobile ? 'center' : 'auto',
         }}
       >
-        {/* 主视频（播放 segment，有声音） */}
-        <video
-          ref={mainVideoRef}
-          style={{
-            position: 'absolute',
-            inset: 0,
-            width: '100%',
-            height: '100%',
-            objectFit: 'contain',
-            transform: 'scale(1.7)',
-            transformOrigin: 'center center',
-            zIndex: 1,
-            opacity: 0,
-            pointerEvents: 'none',
-            transition: 'opacity 0.1s ease',
-          }}
-          playsInline
-          preload="auto"
-          onEnded={onMainEnded}
-          onError={handleMainError}
-        />
+        {/* V37: 微信移动端 — 静态普兰图，不播放任何动画/语音 */}
+        {isWeChatMobile ? (
+          <img
+            src="/pulan_static.png"
+            alt="普兰"
+            draggable={false}
+            style={{
+              position: 'absolute',
+              inset: 0,
+              width: '100%',
+              height: '100%',
+              objectFit: 'contain',
+              // V38: 缩小 scale，避免裁去头部/手部
+              transform: 'scale(1.1)',
+              transformOrigin: 'center center',
+              userSelect: 'none',
+              WebkitUserSelect: 'none',
+            }}
+          />
+        ) : (
+          <>
+            {/* 主视频（播放 segment，有声音） */}
+            <video
+              ref={mainVideoRef}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                width: '100%',
+                height: '100%',
+                objectFit: 'contain',
+                transform: 'scale(1.7)',
+                transformOrigin: 'center center',
+                zIndex: 1,
+                opacity: 0,
+                pointerEvents: 'none',
+                transition: 'opacity 0.1s ease',
+              }}
+              playsInline
+              preload="auto"
+              // @ts-ignore X5 内核同层播放属性（仅腾讯系浏览器生效）
+              x5-playsinline=""
+              x5-video-player-type="h5"
+              x5-video-player-fullscreen="false"
+              webkit-playsinline=""
+              onEnded={onMainEnded}
+              onError={handleMainError}
+            />
 
-        {/* 循环视频（idle / thinking，静音） */}
-        <video
-          ref={loopVideoRef}
-          style={{
-            position: 'absolute',
-            inset: 0,
-            width: '100%',
-            height: '100%',
-            objectFit: 'contain',
-            zIndex: 1,
-            opacity: 0,
-            pointerEvents: 'none',
-            transition: 'opacity 0.15s ease',
-          }}
-          playsInline
-          preload="auto"
-          muted
-          onTimeUpdate={onLoopTimeUpdate}
-          onEnded={onLoopEnded}
-          onError={handleLoopError}
-        />
+            {/* 循环视频（idle / thinking，静音） */}
+            <video
+              ref={loopVideoRef}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                width: '100%',
+                height: '100%',
+                objectFit: 'contain',
+                zIndex: 1,
+                opacity: 0,
+                pointerEvents: 'none',
+                transition: 'opacity 0.15s ease',
+              }}
+              playsInline
+              preload="auto"
+              muted
+              // @ts-ignore X5 内核同层播放属性（仅腾讯系浏览器生效）
+              x5-playsinline=""
+              x5-video-player-type="h5"
+              x5-video-player-fullscreen="false"
+              webkit-playsinline=""
+              onTimeUpdate={onLoopTimeUpdate}
+              onEnded={onLoopEnded}
+              onError={handleLoopError}
+            />
+          </>
+        )}
       </div>
     );
   }

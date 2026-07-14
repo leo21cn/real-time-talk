@@ -41,6 +41,15 @@ function prefersMp4(): boolean {
 }
 const USE_MP4 = prefersMp4();
 
+// V36: 检测是否在微信内置浏览器的移动端（用于显示 PC 访问提示）
+function isWeChatMobileUA(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent;
+  const isWeChat = /MicroMessenger/i.test(ua);
+  const isMobile = /Mobile|iPhone|iPad|iPod|Android/i.test(ua);
+  return isWeChat && isMobile;
+}
+
 let msgCounter = 0;
 function nextMsgId(): string {
   msgCounter++;
@@ -160,6 +169,8 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [currentSegmentIndex, setCurrentSegmentIndex] = useState<number>(-1);
   const [isMobile, setIsMobile] = useState<boolean>(false);
+  // V36: 微信移动端标记 — 首次渲染时同步检测，避免 hydration 闪烁
+  const [isWeChatMobile, setIsWeChatMobile] = useState<boolean>(() => isWeChatMobileUA());
   const [needsUserTap, setNeedsUserTap] = useState<boolean>(true);
 
   // Refs
@@ -382,9 +393,13 @@ export default function App() {
   // 三者到达顺序不确定（无 ack 后服务端一次性推送），任一触发都检查是否该切 idle。
   // isVideoPlayingRef 防止单段回答时 response_complete 提前切 idle（视频还在播放）。
   // 也兼容纯文本回答（无视频段，状态保持 Thinking）。
+  // V37: 微信移动端不播放视频 — 忽略 isVideoPlayingRef 和 videoPlaylistRef，
+  // 仅根据 responseCompleteRef / deferredIdleRef 切 idle。
   const tryGoIdle = useCallback(() => {
-    if (isVideoPlayingRef.current) return;                    // V23: 视频还在播放（首段未结束）
-    if (videoPlaylistRef.current.length > 0) return;          // 还有视频未播
+    if (!isWeChatMobile) {
+      if (isVideoPlayingRef.current) return;                    // V23: 视频还在播放（首段未结束）
+      if (videoPlaylistRef.current.length > 0) return;          // 还有视频未播
+    }
     if (!deferredIdleRef.current && !responseCompleteRef.current) return; // 未收到完成信号
     if (appStateRef.current !== AppState.Speaking &&
         appStateRef.current !== AppState.Bridging &&
@@ -393,7 +408,10 @@ export default function App() {
     deferredIdleRef.current = false;
     responseCompleteRef.current = false;
     setAppState(AppState.Idle);
-    avatarRef.current?.playLoop(USE_MP4 ? IDLE_MP4_SRC : IDLE_SRC);
+    // V37: 微信移动端不调 playLoop（AvatarView 是静态图，方法也是 no-op）
+    if (!isWeChatMobile) {
+      avatarRef.current?.playLoop(USE_MP4 ? IDLE_MP4_SRC : IDLE_SRC);
+    }
     setMessages(prev => {
       const msgs = [...prev];
       const last = msgs[msgs.length - 1];
@@ -402,7 +420,7 @@ export default function App() {
       }
       return msgs;
     });
-  }, []);
+  }, [isWeChatMobile]);
 
   const handleWsEvent = useCallback((event: ServerEvent) => {
     switch (event.type) {
@@ -536,6 +554,8 @@ export default function App() {
   const handleSend = useCallback((text: string) => {
     if (!text.trim()) return;
     unlockAudio();
+    // V35: 在用户手势同步调用栈中预捕获播放权限，解锁 X5 自动播放策略
+    avatarRef.current?.captureGesture();
 
     // V18: 预升 msg_seq
     currentMsgSeqRef.current += 1;
@@ -623,7 +643,24 @@ export default function App() {
         analysisSrc={ANALYSIS_SRC}
         analysisMp4Src={ANALYSIS_MP4_SRC}
         isMobile={isMobile}
+        isWeChatMobile={isWeChatMobile}
       />
+
+      {/* V36: 微信移动端 — 在对话框上方显示 PC 访问提示 */}
+      {isMobile && isWeChatMobile && (
+        <div
+          style={{
+            fontSize: 12,
+            color: '#888',
+            textAlign: 'center',
+            padding: '4px 8px',
+            userSelect: 'none',
+            flexShrink: 0,
+          }}
+        >
+          完美体验请用 PC 访问：pulan.smartmoves.com.cn
+        </div>
+      )}
 
       {/* 聊天面板（移动端占满下方，桌面端在右侧） */}
       <ChatPanel
@@ -631,6 +668,7 @@ export default function App() {
         onSend={handleSend}
         disabled={isProcessing}
         isMobile={isMobile}
+        isWeChatMobile={isWeChatMobile}
       />
 
       {/* 错误提示 */}
@@ -656,8 +694,8 @@ export default function App() {
         {appState}
       </div>
 
-      {/* 移动端首次访问引导遮罩：点击解锁视频自动播放 */}
-      {isMobile && needsUserTap && (
+      {/* V37: 微信移动端不显示首次访问引导遮罩 — 无视频/音频需解锁 */}
+      {isMobile && !isWeChatMobile && needsUserTap && (
         <div
           onClick={() => {
             unlockAudio();
