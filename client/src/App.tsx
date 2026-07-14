@@ -41,7 +41,6 @@ function prefersMp4(): boolean {
 }
 const USE_MP4 = prefersMp4();
 
-// ─── 消息 ID 生成器 ───
 let msgCounter = 0;
 function nextMsgId(): string {
   msgCounter++;

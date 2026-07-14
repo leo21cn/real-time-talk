@@ -322,22 +322,35 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
               try { currentEl.pause(); } catch { /* ignore */ }
             }, 200);
           };
-          // 如果 targetEl 已在播放（wifi 快网）→ 立即涪出 currentEl
-          if (!targetEl.paused && targetEl.currentTime > 0) {
+          // V32 修复：取消「!targetEl.paused && targetEl.currentTime > 0」快速涪出分支。
+          // 原 V15 快速分支依赖于 play() 成功后的状态，但在 X5 微信 5G 慢网下
+          // play().then() 回调时首帧可能还没真正渲染（解码延迟 100-500ms）。
+          // 此期间淡出 currentEl + targetEl 还是空白 → 明显白屏闪现。
+          // 统一走 V30 RVFC 首帧等待路径，最多等 1500ms（覆盖 5G 慢网）。
+          let resolved = false;
+          const onFirstFrame = () => {
+            if (resolved) return;
+            resolved = true;
+            clearTimeout(hardFallback);
+            targetEl.removeEventListener('playing', onPlaying);
             fadeOutCurrent();
-          } else {
-            // 4G/5G 慢网 / 未 playing → 等 targetEl playing 后再涪出 currentEl
-            const onPlaying = () => {
-              targetEl.removeEventListener('playing', onPlaying);
-              clearTimeout(fallbackTimer);
-              fadeOutCurrent();
-            };
-            targetEl.addEventListener('playing', onPlaying);
-            const fallbackTimer = window.setTimeout(() => {
-              targetEl.removeEventListener('playing', onPlaying);
-              fadeOutCurrent();
-            }, 300);
+          };
+          // 优先：requestVideoFrameCallback 首帧回调（精确）
+          const rvfc = (targetEl as any).requestVideoFrameCallback;
+          if (typeof rvfc === 'function') {
+            (targetEl as any).requestVideoFrameCallback(() => onFirstFrame());
           }
+          // 兑底1：playing 事件 + 60ms 微等待（playing 后首帧可能还没画出来）
+          const onPlaying = () => {
+            targetEl.removeEventListener('playing', onPlaying);
+            setTimeout(onFirstFrame, 60);
+          };
+          targetEl.addEventListener('playing', onPlaying);
+          // 兑底2：硬超时 1500ms（原 300ms 不足以覆盖 5G 慢解码）
+          const hardFallback = window.setTimeout(() => {
+            targetEl.removeEventListener('playing', onPlaying);
+            onFirstFrame();
+          }, 1500);
         };
 
         // V13 修复：play() 可能被自动播放策略阻止（尤其当用户点击发送后一段时间才到下一段），
@@ -413,11 +426,15 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
         switchToTarget();
       }
 
+      // V28: 超时从 800ms 延长至 5000ms，适配 5G 移动网络下 segment 下载耗时（1-2s）。
+      // 800ms 在 5G 下早于 canplay 触发，导致 mainVideo 无帧数据时被设为可见、
+      // loopVideo 同时被隐藏 → 卡通形象消失 1-2s。5000ms 覆盖 5G 场景，
+      // canplay 自然先于超时触发完成正常切换。WiFi 下 canplay<200ms 不受影响。
       mainSwitchTimerRef.current = window.setTimeout(() => {
         if (!mainReadyRef.current) {
           switchToTarget();
         }
-      }, 800);
+      }, 5000);
     }, [clearMainSwitchTimer, clearMainSrcClearTimer, assignVideoSrc]);
 
     // src 为已解析的 objectURL 或原始 HTTP URL；originalSrc 可选，记录来源用于错误兑底
@@ -1171,4 +1188,26 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
         <video
           ref={loopVideoRef}
           style={{
-            position: 'absolut
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'contain',
+            zIndex: 1,
+            opacity: 0,
+            pointerEvents: 'none',
+            transition: 'opacity 0.15s ease',
+          }}
+          playsInline
+          preload="auto"
+          muted
+          onTimeUpdate={onLoopTimeUpdate}
+          onEnded={onLoopEnded}
+          onError={handleLoopError}
+        />
+      </div>
+    );
+  }
+);
+
+export default AvatarView;
