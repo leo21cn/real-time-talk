@@ -29,8 +29,20 @@ import {
 // mp4 副本作为移动端 fallback（iOS Safari / 微信内置浏览器对 WebM/VP9 解码不稳定）
 const IDLE_SRC = '/api/clips/idle/idle_breathing.webm?v=10';
 const IDLE_MP4_SRC = '/api/clips/idle/idle_breathing.mp4?v=10';
-const ANALYSIS_SRC = '/api/clips/idle/idle_breathing.webm?v=11';
-const ANALYSIS_MP4_SRC = '/api/clips/idle/idle_breathing.mp4?v=11';
+// V48 bugfix: ANALYSIS_SRC 之前错误指向 idle/idle_breathing.webm?v=11，
+// 导致 thinking/bridging 状态下卡通形象实际播放的是 idle 动画（base path 相同，
+// showLoop 不切换 src），用户在连续对话中看到卡通形象"思考时和待机时一样"，
+// 视觉上判断为"语音死循环/重复说话"。
+// 修正为指向 clips/.webm/analysis.webm（routes_clips.py 支持该路径）。
+//
+// V48.1 fix: analysis.webm 实际内容是"普兰的说话动作"（睁眼/闭眼 + 张嘴 + 上半身姿势），
+// 与 greeting/explaining 等 speaking clip 视觉上几乎一致。用户看到 thinking 阶段
+// 会误认为"还是普兰在说话"，触发"思考动画错误"反馈。
+// 临时方案：让 thinking 阶段显示 idle 视频（平静的完整普兰），与 speaking 状态
+// 视觉上明显不同（没有嘴部动作、没有表情变化），用户能清楚识别"普兰在等待"。
+// 长期方案：需要重新制作一段明显的"思考动作"clip（如手托下巴、眼睛看向别处）。
+const ANALYSIS_SRC = IDLE_SRC;
+const ANALYSIS_MP4_SRC = IDLE_MP4_SRC;
 
 // 检测是否需要优先使用 mp4（iOS Safari、微信内置浏览器对 WebM/VP9 支持不稳定）
 function prefersMp4(): boolean {
@@ -193,6 +205,8 @@ export default function App() {
   const responseCompleteRef = useRef<boolean>(false);
   const displayedLenRef = useRef<number>(0);
   const isVideoPlayingRef = useRef<boolean>(false);
+  // V50: 防重入，防止 video-ended handler 被快速连续调用两次
+  const videoEndedLockRef = useRef<boolean>(false);
 
   // V17: 当前会话的 msg_seq（从服务端的 session_reset / segment_ready 等事件读取）。
   // 用于过滤旧会话的残留事件（上一轮取消后还未发出的 segment_ready）。
@@ -205,6 +219,8 @@ export default function App() {
   const totalSegmentsRef = useRef<number | null>(null);
   // V8: 打字机动画 timer 列表（用于清理，避免内存泄漏）
   const typingTimersRef = useRef<Set<ReturnType<typeof setInterval>>>(new Set());
+  // V49: 记录本轮对话已收到的 segment index，防止客户端重复消费同一 segment_ready 事件
+  const receivedSegmentIndicesRef = useRef<Set<number>>(new Set());
 
   useEffect(() => {
     currentSegmentIndexRef.current = currentSegmentIndex;
@@ -328,6 +344,13 @@ export default function App() {
       return;
     }
 
+    // V49: 去重保护 — 如果同 index 的 segment_ready 已处理过，跳过
+    if (receivedSegmentIndicesRef.current.has(index)) {
+      console.warn(`[V49] 丢弃重复 segment_ready (index=${index}, seq=${eventSeq})`);
+      return;
+    }
+    receivedSegmentIndicesRef.current.add(index);
+
     const msgId = activeAiMsgIdRef.current;
     if (!msgId) return;
 
@@ -353,8 +376,13 @@ export default function App() {
       avatarRef.current?.play(video_url);
     } else {
       // V23: 后续段推入播放列表，由 video-ended 逐个消费
-      videoPlaylistRef.current.push({ url: video_url, duration_ms });
-      avatarRef.current?.preloadVideo(video_url);
+      // V51: URL 去重 — 防止同一视频被播放两次
+      if (!videoPlaylistRef.current.some(item => item.url === video_url)) {
+        videoPlaylistRef.current.push({ url: video_url, duration_ms });
+        avatarRef.current?.preloadVideo(video_url);
+      } else {
+        console.warn(`[V51] 丢弃重复视频 URL: ${video_url}`);
+      }
     }
 
     // V5: 拉 manifest + 预加载段 N+1
@@ -532,6 +560,11 @@ export default function App() {
   useEffect(() => {
     const handler = () => {
       if (appStateRef.current !== AppState.Speaking) return;
+      // V50: 防重入 — 防止同一 segment 的 video-ended 被连续触发两次
+      if (videoEndedLockRef.current) return;
+      videoEndedLockRef.current = true;
+      // 在微任务中释放锁（当前调用栈结束后）
+      Promise.resolve().then(() => { videoEndedLockRef.current = false; });
 
       const next = videoPlaylistRef.current.shift();
       if (next) {
@@ -554,8 +587,6 @@ export default function App() {
   const handleSend = useCallback((text: string) => {
     if (!text.trim()) return;
     unlockAudio();
-    // V35: 在用户手势同步调用栈中预捕获播放权限，解锁 X5 自动播放策略
-    avatarRef.current?.captureGesture();
 
     // V18: 预升 msg_seq
     currentMsgSeqRef.current += 1;
@@ -571,6 +602,8 @@ export default function App() {
     videoPlaylistRef.current = [];
     activeAiTextRef.current = '';
     displayedLenRef.current = 0;
+    // V49: 清理已接收 segment index 集合
+    receivedSegmentIndicesRef.current.clear();
 
     // V8: 清理打字机动画 timers
     typingTimersRef.current.forEach(t => {
@@ -602,7 +635,9 @@ export default function App() {
     setMessages(prev => [...prev, userMsg, aiMsg]);
 
     setAppState(AppState.Thinking);
+    // V52: 先播 thinking 动画，再在同一个手势栈中预捕获播放权限
     avatarRef.current?.playLoop(USE_MP4 ? ANALYSIS_MP4_SRC : ANALYSIS_SRC);
+    avatarRef.current?.captureGesture();
 
     ws.sendMessage(text);
   }, [ws]);
@@ -625,7 +660,9 @@ export default function App() {
     overflow: 'hidden',
     display: 'flex',
     alignItems: isMobile ? 'stretch' : 'center',
-    justifyContent: 'center',
+    // V48.6: 改为 flex-start，避免 content 总宽 > viewport 时 avatar 被 justifyContent 'center' 推出屏幕左边（实际位置 x = -47 溢出）。
+    // 修复后 avatar 始终位于左边，符合「形象在左、聊天在右」的 layout 预期。
+    justifyContent: 'flex-start',
     padding: isMobile ? 'max(8px, env(safe-area-inset-top)) 8px max(8px, env(safe-area-inset-bottom)) 8px' : '20px',
     boxSizing: 'border-box',
     gap: isMobile ? '8px' : '24px',

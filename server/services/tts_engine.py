@@ -211,12 +211,17 @@ class TtsEngine:
         concat_list = output_path.parent / f"concat_{output_path.stem}.txt"
         concat_list.write_text("\n".join(f"file '{p}'" for p in temp_files))
 
-        import subprocess
-        subprocess.run(
-            ["ffmpeg", "-f", "concat", "-safe", "0", "-i", str(concat_list),
-             "-c", "copy", "-y", str(output_path)],
-            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+        # V50: 改用异步 subprocess，避免阻塞 asyncio 事件循环
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-f", "concat", "-safe", "0", "-i", str(concat_list),
+            "-c", "copy", "-y", str(output_path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
+        if proc.returncode != 0:
+            err = stderr.decode()[:200] if stderr else "未知错误"
+            raise TtsError(f"TTS 音频拼接失败: {err}")
 
         # 清理临时文件
         for tf in temp_files:

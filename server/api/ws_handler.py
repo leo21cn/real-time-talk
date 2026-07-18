@@ -261,6 +261,8 @@ class WsHandler:
                     buffer = buffer[boundary + 1:]
 
                     logger.info(f"流式识别段 {segment_index}: {sentence[:30]}...")
+                    # V53: 诊断—输出完整句子文本以便检测重复
+                    logger.info(f"[V53-stream-seg] idx={segment_index} text={sentence!r}")
 
                     # 立即启动段生成（TTS + 语义分析 + 拼接 + MinIO）
                     task = asyncio.ensure_future(

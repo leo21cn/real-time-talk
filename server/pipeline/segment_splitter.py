@@ -109,12 +109,36 @@ class SegmentSplitter:
         # 构造 Segment 列表
         segments = [Segment(index=i, text=t) for i, t in enumerate(raw_segments)]
 
+        # V51: 相邻段文本去重 — 检测重叠/高度相似并合并
+        segments = self._dedup_adjacent(segments)
+
         logger.info(
             f"V8 文本分段: {len(text)} 字 → {len(segments)} 段 "
             f"(target={self.target}, max={self.max_len}), "
             f"段长: {[len(s.text) for s in segments]}"
         )
+        # V53: 诊断日志—输出每段实际文本（限制前 60 字符避免日志过长）
+        for s in segments:
+            logger.info(f"[V53-seg text] idx={s.index} len={len(s.text)} text={s.text[:60]!r}")
         return segments
+
+    def _dedup_adjacent(self, segments: List[Segment]) -> List[Segment]:
+        """
+        V51: 检测相邻段文本是否高度重叠，若是则合并。
+        防止 LLM 拆分导致两段 TTS 合成几乎相同的内容，产生"重复读一句话"感知。
+        """
+        if len(segments) <= 1:
+            return segments
+        result = [segments[0]]
+        for seg in segments[1:]:
+            prev = result[-1]
+            # 简单检测：如果当前段文本是前一段的子串，或前一段是当前段的子串
+            if seg.text in prev.text or prev.text in seg.text:
+                logger.warning(f"V51: 合并重叠段 idx={prev.index}+{seg.index}: {prev.text[:30]}... + {seg.text[:30]}...")
+                result[-1] = Segment(index=prev.index, text=prev.text + seg.text)
+            else:
+                result.append(seg)
+        return result
 
     def _split_sentences(self, text: str) -> List[str]:
         """按中文标点拆分句子，保留标点在句子末尾"""

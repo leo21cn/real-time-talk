@@ -7,7 +7,7 @@
  * - Token 过期时重新创建 Session
  * - 消息收发与事件回调注册
  */
-import { useRef, useCallback, useEffect } from 'react';
+import { useRef, useCallback, useEffect, useMemo } from 'react';
 import type { ClientMessage, ServerEvent } from '../types/events';
 import { createSession } from '../services/api';
 
@@ -179,11 +179,13 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
     };
   }, [connect]);
 
-  return {
+  // V41: useMemo 稳定返回对象，让依赖 ws 对象的 useCallback（如 App.handleSend）
+  // 在父组件重渲染时不会重建，从而避免 ChatPanel 收到的 onSend 引用变化。
+  return useMemo(() => ({
     sendMessage,
     sendAck,
     sendCancel,
     isConnected,
     getToken,
-  };
+  }), [sendMessage, sendAck, sendCancel, isConnected, getToken]);
 }

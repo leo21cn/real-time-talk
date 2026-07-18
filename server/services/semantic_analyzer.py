@@ -122,4 +122,20 @@ class SemanticAnalyzer:
         if not labels:
             labels = ["explaining"]
 
+        # V49: 单标签时尝试追加互补 body 标签，增加视频剪辑多样性
+        body_labels = {"explaining", "listing", "emphasis", "example", "comparison", "analysis"}
+        if len(labels) == 1 and labels[0] in body_labels:
+            # 从其余 body 类别中尝试匹配关键词
+            extra_checks = [
+                ("emphasis", ["关键", "重要", "必须", "核心", "注意", "重点", "特别", "尤其", "值得"]),
+                ("example", ["例如", "比如", "举例", "例子", "打个比方", "像", "譬如", "案例", "实例"]),
+                ("listing", ["第一", "首先", "其次", "另外", "此外", "最后", "一是", "二是", "三是", "一方面", "另一方面"]),
+                ("explaining", ["概念", "意思", "指", "定义", "解释", "说明", "描述", "所谓", "简单来说"]),
+                ("comparison", ["对比", "相比", "差异", "优劣", "区别", "不同", "比较"]),
+            ]
+            for candidate_label, kws in extra_checks:
+                if candidate_label != labels[0] and any(kw in text_lower for kw in kws):
+                    labels.append(candidate_label)
+                    break
+
         return validate_labels(labels)

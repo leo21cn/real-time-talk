@@ -78,13 +78,10 @@ class StreamingPipeline:
                 )
                 tasks.append(task)
 
-            # V6: 启动所有段生成任务后，立即 push segment_pending(0..N-1) 给客户端
-            # 客户端会立即启动预加载 fetch（带重试），与段生成并行。
-            # 当段 0 ready 时客户端已经 fetch 了段 1+ 全部；段 0 视频播完时
-            # buffer 中后续段已经就绪，video-ended 后从 buffer 立即切换。
-            # 这是 HLS/DASH 风格的 sliding buffer 机制。
+            # V46: segment_pending 推送 mp4 URL（PC 浏览器优先 H.264 硬解）。
+            # 若 mp4 文件不存在（生成失败），客户端会 404 回退 — 但 webm 永远存在。
             for seg in segments:
-                pending_url = f"/api/media/{self.session_id}/segment_{seg.index}.webm?seq={self.msg_seq}"
+                pending_url = f"/api/media/{self.session_id}/segment_{seg.index}.mp4?seq={self.msg_seq}"
                 await self._push_event({
                     "type": "segment_pending",
                     "index": seg.index,
@@ -154,17 +151,26 @@ class StreamingPipeline:
         V8: 不再逐字推送 bubble_char。打字机效果由客户端本地动画实现
         （useTypingAnimation 按 duration_ms * 60% 推进 displayedLen），
         消除 WebSocket 串行推送造成的卡通形象与文字不同步。
+
+        V46: 同时推送 webm 和 mp4 两个 URL，客户端按 prefersMp4() 选优。
+        - video_url: 首选（mp4 优先，没有则 webm）
+        - video_url_webm / video_url_mp4: 显式供客户端 fallback
         """
         try:
             # 使用 API 代理路径（避免 MinIO presigned URL 在浏览器不可达）
             # V18: 添加 seq 参数区分不同轮对话，避免浏览器/IndexedDB 缓存碰撞
-            video_url = f"/api/media/{self.session_id}/segment_{index}.webm?seq={self.msg_seq}"
+            video_url_webm = f"/api/media/{self.session_id}/segment_{index}.webm?seq={self.msg_seq}"
+            video_url_mp4 = f"/api/media/{self.session_id}/segment_{index}.mp4?seq={self.msg_seq}"
+            # 优先 mp4（PC 浏览器 H.264 硬解，避免 VP9 软解卡顿）
+            video_url = video_url_mp4 if result.video_path_mp4 else video_url_webm
 
             # 一次性推送 segment_ready（含完整 text + duration_ms）
             await self._push_event({
                 "type": "segment_ready",
                 "index": index,
                 "video_url": video_url,
+                "video_url_webm": video_url_webm,
+                "video_url_mp4": video_url_mp4,
                 "duration_ms": result.duration_ms,
                 "text": result.text,
             })

@@ -37,22 +37,50 @@ async def get_media(session_token: str, filename: str):
     }
 
     # 优先尝试本地文件（避免 MinIO presigned URL 在浏览器不可达）
-    # 视频拼接输出为 output_X.webm，直接匹配请求的 segment_X.webm
+    # 视频拼接输出为 output_X.webm / output_X.mp4，直接匹配请求的 segment_X.*
     work_dir = Path(f"_work/{session_token}")
     output_name = filename.replace("segment_", "output_")
     local_path = work_dir / output_name
+
+    # V47: mp4 不存在时立即 fallback 到 webm（V46 的 fallback 是死代码 — 在 if exists 内部检查 not exists）
+    # 根因：mp4 重编码可能失败（libx264 性能 / 超时），只有 webm 文件存在。
+    # 客户端 USE_MP4=true 时请求 .mp4，若 404 则视频加载失败 → 卡通形象消失。
+    if filename.lower().endswith(".mp4") and not local_path.exists():
+        webm_path = local_path.with_suffix(".webm")
+        if webm_path.exists():
+            logger.info(f"[V47] mp4 不存在，fallback 到 webm: {filename}")
+            local_path = webm_path
+            output_name = output_name.replace(".mp4", ".webm")
+
     if local_path.exists() and local_path.is_file():
-        media_type = "video/webm" if filename.endswith(".webm") else "audio/mpeg"
+        # V46: MIME 映射
+        if filename.lower().endswith(".mp4") or str(local_path).endswith(".mp4"):
+            media_type = "video/mp4" if str(local_path).endswith(".mp4") else "video/webm"
+        elif filename.lower().endswith(".webm") or str(local_path).endswith(".webm"):
+            media_type = "video/webm"
+        elif filename.lower().endswith(".mp3"):
+            media_type = "audio/mpeg"
+        else:
+            media_type = "application/octet-stream"
         return FileResponse(
             str(local_path),
             media_type=media_type,
             headers=cache_headers,
         )
 
+    # V46: MIME 映射（MinIO / alt_path 分支）
+    if filename.lower().endswith(".mp4"):
+        media_type = "video/mp4"
+    elif filename.lower().endswith(".webm"):
+        media_type = "video/webm"
+    elif filename.lower().endswith(".mp3"):
+        media_type = "audio/mpeg"
+    else:
+        media_type = "application/octet-stream"
+
     # 也尝试原始文件名
     alt_path = work_dir / filename
     if alt_path.exists() and alt_path.is_file():
-        media_type = "video/webm" if filename.endswith(".webm") else "audio/mpeg"
         return FileResponse(
             str(alt_path),
             media_type=media_type,

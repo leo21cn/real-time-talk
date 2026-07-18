@@ -4,7 +4,7 @@
  * - 中间：历史气泡列表（滚动）
  * - 底部：输入框 + 发送按钮
  */
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, memo } from 'react';
 import ChatBubble from './ChatBubble';
 import VoiceInputButton from './VoiceInputButton';
 import type { ChatMessage } from '../types/chat';
@@ -19,15 +19,65 @@ interface ChatPanelProps {
   isWeChatMobile?: boolean;
 }
 
-export default function ChatPanel({ messages, onSend, disabled, isMobile = false, isWeChatMobile = false }: ChatPanelProps) {
+// V41: 用 React.memo 包裹函数组件（需在 ChatPanel 定义之前先声明类型）
+// 配合 useWebSocket 的 useMemo（P1.4）让 onSend 引用稳定，
+// memo 才能真正跳过打字期间的不必要重渲染。
+function ChatPanelInner({ messages, onSend, disabled, isMobile = false, isWeChatMobile = false }: ChatPanelProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  // V44 P0: 用户是否在底部附近 — 只有"贴底"时才自动跟随新消息滚动。
+  // 用户上滑查看历史时，不应被打字变化拖回底部。
+  const userAtBottomRef = useRef<boolean>(true);
 
-  // 自动滚动到最新消息
+  // V44 P0: ResizeObserver 监听消息容器高度变化 — 代替依赖 messages 的 useEffect。
+  // 原实现每次 messages 变化都 scrollTop=scrollHeight，触发 layout（读 scrollHeight）+
+  // paint（写 scrollTop）。打字期间 messages 每 200-300ms 变一次，每次都 layout。
+  // ResizeObserver 在浏览器内部已优化的布局回调中触发，不占用主线程的 React render 路径。
   useEffect(() => {
-    if (listRef.current) {
-      listRef.current.scrollTop = listRef.current.scrollHeight;
+    const list = listRef.current;
+    if (!list || typeof ResizeObserver === 'undefined') {
+      // 兑底：老浏览器走原 useEffect 路径
+      list?.scrollTo({ top: list.scrollHeight });
+      return;
     }
+
+    const ro = new ResizeObserver((entries) => {
+      // 只有当气泡高度实际增长且用户贴底时才跟随
+      if (!userAtBottomRef.current) return;
+      const entry = entries[0];
+      // 避免不必要的滚动：只有高度增加时才 scroll
+      const newHeight = entry.contentRect.height;
+      list.scrollTo({ top: list.scrollHeight, behavior: 'auto' });
+    });
+    ro.observe(list);
+    // 首次挂载时滚到底
+    list.scrollTo({ top: list.scrollHeight });
+
+    // 跟踪用户是否在底部（上下 80px 内视为贴底）
+    const onScroll = () => {
+      const distanceFromBottom = list.scrollHeight - list.scrollTop - list.clientHeight;
+      userAtBottomRef.current = distanceFromBottom < 80;
+    };
+    list.addEventListener('scroll', onScroll, { passive: true });
+
+    return () => {
+      ro.disconnect();
+      list.removeEventListener('scroll', onScroll);
+    };
+  }, []);
+
+  // V51: 新消息 / 打字期间 displayedLen 变化时滚动到底部。
+  // 依赖 messages 数组引用本身，typing 期间 setMessages(prev.map(...)) 每字符都返回新引用 → 触发滚动。
+  // RAF 节流避免 typing 高频时多次 scrollTo 导致 layout thrashing。
+  // 仅在用户贴底（userAtBottomRef）时才滚动，避免用户上滑查看历史时被拖回。
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    if (!userAtBottomRef.current) return;
+    const rafId = requestAnimationFrame(() => {
+      list.scrollTo({ top: list.scrollHeight, behavior: 'auto' });
+    });
+    return () => cancelAnimationFrame(rafId);
   }, [messages]);
 
   const handleSend = useCallback(() => {
@@ -240,3 +290,7 @@ export default function ChatPanel({ messages, onSend, disabled, isMobile = false
     </div>
   );
 }
+
+const ChatPanel = memo(ChatPanelInner);
+
+export default ChatPanel;

@@ -17,7 +17,7 @@ class LlmConfig(BaseModel):
     endpoint: str = "https://api.openai.com/v1"
     api_key: str = ""
     model: str = "gpt-4o"
-    max_tokens: int = 2048
+    max_tokens: int = 1200
 
 
 class TtsConfig(BaseModel):
@@ -94,7 +94,7 @@ class AppConfig(BaseSettings):
     llm_endpoint: str = Field(default="https://api.openai.com/v1", alias="LLM_ENDPOINT")
     llm_api_key: str = Field(default="", alias="LLM_API_KEY")
     llm_model: str = Field(default="gpt-4o", alias="LLM_MODEL")
-    llm_max_tokens: int = Field(default=2048, alias="LLM_MAX_TOKENS")
+    llm_max_tokens: int = Field(default=1200, alias="LLM_MAX_TOKENS")
 
     # TTS 配置
     tts_api_key: str = Field(default="", alias="DASHSCOPE_API_KEY")
@@ -209,7 +209,7 @@ def load_config() -> dict:
             "endpoint": _get(["llm", "endpoint"], json_cfg, env_settings.llm_endpoint, "https://api.openai.com/v1"),
             "api_key": _get(["llm", "api_key"], json_cfg, env_settings.llm_api_key, ""),
             "model": _get(["llm", "model"], json_cfg, env_settings.llm_model, "gpt-4o"),
-            "max_tokens": _get(["llm", "max_tokens"], json_cfg, env_settings.llm_max_tokens, 2048),
+            "max_tokens": _get(["llm", "max_tokens"], json_cfg, env_settings.llm_max_tokens, 1200),
         },
         "tts": {
             "api_key": _get(["tts", "api_key"], json_cfg, env_settings.tts_api_key, ""),

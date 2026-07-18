@@ -6,7 +6,7 @@
  * - 首段切换：等待 analysis 循环自然结束
  * - 客户端预缓存：所有 *.src 赋值前先尝试 IndexedDB 命中 → URL.createObjectURL
  */
-import { useRef, useCallback, useEffect, forwardRef, useImperativeHandle } from 'react';
+import { useRef, useCallback, useEffect, forwardRef, useImperativeHandle, memo } from 'react';
 import { getCachedClipUrl } from '../services/clipCache';
 
 export interface AvatarViewHandle {
@@ -52,7 +52,7 @@ interface AvatarViewProps {
   isWeChatMobile?: boolean;
 }
 
-const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
+const AvatarView = memo(forwardRef<AvatarViewHandle, AvatarViewProps>(
   function AvatarView(
     {
       idleSrc = '/api/clips/idle/idle_breathing.webm?v=10',
@@ -73,6 +73,7 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
     const mainSwitchTimerRef = useRef<number | null>(null);
     const mainSrcClearTimerRef = useRef<number | null>(null);
     const bridgeFadeTimerRef = useRef<number | null>(null); // V25: 桥接涪出兑底定时器
+    const videoEndedDispatchedRef = useRef(false); // V50: 防重入，同一 segment 只 dispatch 一次 video-ended
     const activeElementRef = useRef<'main' | 'loop'>('loop'); // 当前可见的视频元素
     const loopIsSegmentRef = useRef(false); // loop 是否正在播放 segment（用于 ended 判断）
     const idleLoopActiveRef = useRef(false); // JS 手动接管 idle 无缝循环
@@ -349,6 +350,8 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
       thinkingModeRef.current = false;
       idleLoopActiveRef.current = false;
       mainReadyRef.current = false;
+      // V50: 新 segment 开始，重置 video-ended 防重入标志
+      videoEndedDispatchedRef.current = false;
 
       // 确定谁是当前可见的（旧帧）和谁将预加载新段
       const currentActive = activeElementRef.current;
@@ -358,7 +361,9 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
       // 配置目标元素用于 segment 播放
       if (targetEl === loopVideo) {
         loopIsSegmentRef.current = true;
-        loopVideo.style.transform = 'scale(1.7)';
+        // V48.4: 与 mainVideo 一致 scale(1) — 让 segment 视频在 loopVideo 上播放时
+        // 也保持视觉大小统一（避免 segment_1/3/5 在 loopVideo 上看起来"被裁剪变小"）。
+        loopVideo.style.transform = 'scale(1)';
         loopVideo.style.transformOrigin = 'center center';
         loopVideo.muted = true; // 先静音，等切换完成再取消静音
         loopVideo.volume = 1.0;
@@ -369,11 +374,19 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
         mainVideo.volume = 1.0;
       }
 
+      // V53 fix: 确保 currentEl 作为桥接帧可见。showLoop 的 bridge 逻辑可能
+      // 已将 currentEl 设为 opacity=0（loopVideo hidden, mainVideo 显旧帧），
+      // 此时 targetEl 加载新 src 会空白 → 双黑屏 → 卡死。
+      // 显式恢复 currentEl 作为加载期间的视觉桥接。
+      currentEl.style.transition = 'none';
+      currentEl.style.opacity = '1';
+      currentEl.style.pointerEvents = 'auto';
+
       const switchToTarget = () => {
         if (mainReadyRef.current) return;
         mainReadyRef.current = true;
         clearMainSwitchTimer();
-      
+
         // V33: 独立追踪 finalize 是否已被调用。
         // 原设计完全依赖 play().then() 来触发 finalize，但在 X5 内核上
         // play() 可能永远不 resolve 也不 reject（静默 pending），导致
@@ -392,6 +405,12 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
           targetEl.style.transition = 'none';
           targetEl.style.opacity = '1';
           targetEl.style.pointerEvents = 'auto';
+          // V53 fix: finalize 后强制重播一次，避免上游 play() 被某种因素
+          // (Chrome autoplay policy / 时序竞态) 隐式暂停导致首帧冻结。
+          // mute=false 后 play() 需要用户手势上下文（handleSend 中 captureGesture 提供）。
+          if (targetEl.paused) {
+            targetEl.play().catch(() => { /* ignore */ });
+          }
           // V11: play() 成功后延迟 unmute（确保 currentTime > 0 才允许声音）
           // 避免某些浏览器因 unmute 提前而阻止后续 play
           if (targetEl.currentTime > 0.05 || targetEl.readyState >= 2) {
@@ -406,7 +425,7 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
             tryUnmute();
           }
           activeElementRef.current = currentActive === 'main' ? 'loop' : 'main';
-      
+
           // V15: currentEl 涪出策略
           const fadeOutCurrent = () => {
             currentEl.style.transition = 'opacity 0.15s ease';
@@ -416,11 +435,17 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
               try { currentEl.pause(); } catch { /* ignore */ }
             }, 200);
           };
-          // V32 修复：取消「!targetEl.paused && targetEl.currentTime > 0」快速涪出分支。
-          // 原 V15 快速分支依赖于 play() 成功后的状态，但在 X5 微信 5G 慢网下
-          // play().then() 回调时首帧可能还没真正渲染（解码延迟 100-500ms）。
-          // 此期间淡出 currentEl + targetEl 还是空白 → 明显白屏闪现。
-          // 统一走 V30 RVFC 首帧等待路径，最多等 1500ms（覆盖 5G 慢网）。
+          // V48 fix: 恢复 f549284 的快速涪出分支。
+          // 在 PC Chrome 标准浏览器上，targetEl.play().then() 解析时首帧通常已可显示
+          // （webm/mp4 已预热 / IndexedDB 缓存命中），此时直接涪出 currentEl 比等
+          // RVFC 帧回调快得多（避免 currentEl 旧帧停留造成“卡顿”）。
+          // RVFC + playing event 兜底保留用于 5G/X5 慢网解码延迟场景。
+          if (!targetEl.paused && targetEl.currentTime > 0) {
+            // 快速路径：targetEl 已在播 → 立即涪出 currentEl
+            fadeOutCurrent();
+            return;
+          }
+          // 慢网兑底：V30 RVFC 首帧等待路径（覆盖 5G 慢解码）。最多等 1500ms。
           let resolved = false;
           const onFirstFrame = () => {
             if (resolved) return;
@@ -586,53 +611,42 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
       // 判断是否为 idle 模式
       const isIdle = !src || !src.includes('analysis');
 
-      // speaking→idle 时 loopVideo 带有 scale(1.7)，保持当前可见视频桥接避免空白闪烁
-      // idle→analysis 切换时 keep idle 帧可见，利用浏览器最后一帧缓存消除闪烁
-      const loopHasScale = loopVideo.style.transform.includes('scale(1.7)');
-      let mainIsBridge = false; // mainVideo 是否作为桥接（保持可见）
+      // V51: speaking→idle 时 loopVideo 带有 scale(0.589)，保持桥接避免空白闪烁
+      const loopHasScale = loopVideo.style.transform.includes('scale(0.589)');
+      let mainIsBridge = false;
       if (loopHasScale) {
         if (activeElementRef.current === 'main') {
-          // mainVideo 当前可见 → 只隐藏 loopVideo（带 scale），mainVideo 保持桥接
           loopVideo.pause();
           loopVideo.style.transition = 'none';
           loopVideo.style.opacity = '0';
           loopVideo.style.pointerEvents = 'none';
           mainIsBridge = true;
         } else {
-          // loopVideo 当前可见但带 scale → 检查 mainVideo 是否有可用内容
           const mainHasContent = mainVideo.src && mainVideo.readyState >= 1;
-          loopVideo.style.transition = 'none';
-          loopVideo.style.opacity = '0';
-          loopVideo.style.pointerEvents = 'none';
-          loopVideo.pause();
           if (mainHasContent) {
-            // mainVideo 有内容 → 作为桥接
+            // 有 mainVideo 桥接内容 → 隐藏 loopVideo，用 mainVideo 过渡
+            loopVideo.style.transition = 'none';
+            loopVideo.style.opacity = '0';
+            loopVideo.style.pointerEvents = 'none';
+            loopVideo.pause();
             mainVideo.style.transition = 'none';
             mainVideo.style.opacity = '1';
             mainVideo.style.pointerEvents = 'auto';
             mainIsBridge = true;
-          } else {
-            // mainVideo 无内容 → 回退：保持 loopVideo 可见（带 scale 好过空白）
-            loopVideo.style.opacity = '1';
-            loopVideo.style.pointerEvents = 'auto';
-            mainIsBridge = false;
           }
+          // V52 fix: mainVideo 无内容时，不操作 loopVideo（无需 hide→show 闪烁）。
+          // loopVideo 正在显示 idle 动画，保持当前状态即可。
+          // 首次交互时此路径会导致 blink：opacity=0→pause→opacity=1，视觉卡顿。
         }
       } else {
-        // V10 修复：标准路径（segment→idle）不要立即隐藏 mainVideo，
-        // 让 mainVideo 作为桥接保持可见，等 loopVideo idle canplay 后再淡出。
-        // 原因：移动端 loopVideo 加载 idle webm/mp4 需要 1-3s，
-        // 期间 mainVideo opacity=0 + loopVideo opacity=0 会导致卡通形象消失。
         const mainHasContent = mainVideo.src && mainVideo.readyState >= 1;
         if (activeElementRef.current === 'main' && mainHasContent) {
-          // mainVideo 当前可见且有内容 → 作为桥接
           mainVideo.pause();
           mainVideo.style.transition = 'none';
           mainVideo.style.opacity = '1';
           mainVideo.style.pointerEvents = 'auto';
           mainIsBridge = true;
         } else {
-          // mainVideo 不在 active 或无内容 → 隐藏
           mainVideo.pause();
           mainVideo.style.transition = 'none';
           mainVideo.style.opacity = '0';
@@ -646,14 +660,18 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
         mainSrcClearTimerRef.current = window.setTimeout(() => {
           mainSrcClearTimerRef.current = null;
           releaseVideoSrc('main');
-          mainVideo.src = '';
-          mainVideo.load();
+          // V48 fix: 不要清空 mainVideo.src！
+          // 原因：mainVideo.src = '' 会触发 MEDIA_ERR_SRC_NOT_SUPPORTED (error 4) 错误状态，
+          // 即使下次 showMain 设了新 src，video element 也可能不会立即重置。
+          // 保留 src （是上一个 segment 的 URL），下次 showMain 调用 assignVideoSrc
+          // 会用新 src 替换（assignVideoSrc 内部先设新 src 再 revoke 旧 blob）。
+          // 不调用 load() 避免清空浏览器已缓存的视频帧。
         }, 150);
       }
 
-      // 重置 loop 样式为 loop 模式
-      loopVideo.style.transform = '';
-      loopVideo.style.transformOrigin = '';
+      // V51: scale(0.589) 缩小 idle 使普兰匹配 speaking 高度。
+      loopVideo.style.transform = 'scale(0.589)';
+      loopVideo.style.transformOrigin = 'center center';
       loopVideo.muted = true;
 
       if (isIdle) {
@@ -661,30 +679,33 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
         loopVideo.loop = false;
         idleLoopActiveRef.current = true;
       } else {
-        // analysis：原生 loop 循环播放（onLoopTimeUpdate 检查 pending 段触发切换）
-        loopVideo.loop = true;
+        // V48 fix: analysis 也改用 JS 无缝循环（原生 loop=true 在 restart 时
+        // 触发 ended→空白帧→用户看到卡通形象消失）
+        loopVideo.loop = false;
         idleLoopActiveRef.current = false;
       }
 
-      // 比较基础路径（忽略查询参数），避免 idle↔analysis 同文件重复加载导致空白帧
-      // V27: 使用 loopOriginalUrlRef 而非 getAttribute('src') 进行路径比较。
-      // 当 idle 视频从 IndexedDB 缓存加载时，getAttribute('src') 返回 blob: URL，
-      // 与新的 HTTP URL 永远不匹配，导致错误地触发 src 切换 → 网络重新加载 →
-      // 移动端 4G/5G 慢网下 loopVideo 无帧可显示，卡通形象消失 ~1s。
-      // 参考：loopOriginalUrlRef 记录了原始 HTTP URL，即使当前 src 是 blob 也正确。
+      // 比较完整 URL（包含 query 参数），避免相同 base path 但不同 ?v 的 URL
+      // 被误判为相同（例：idle?v=10 vs idle?v=11）。V48 修复前的分析动画
+      // 实际指向 idle 路径，showLoop 跳过了 src 切换，导致卡通形象在 thinking
+      // 状态下沿用 idle 动画 → "语音死循环" 视觉错觉。
       const currentSrc = loopOriginalUrlRef.current || loopVideo.getAttribute('src');
-      const currentBase = currentSrc ? currentSrc.split('?')[0] : '';
-      const newBase = src ? src.split('?')[0] : '';
-      if (src && currentBase !== newBase) {
-        if (!loopHasScale && !isIdle) {
-          // idle→analysis：keep 当前帧，直接设新 src（不清除旧数据）
+      const currentFull = currentSrc ? currentSrc.split('#')[0] : '';
+      const newFull = src ? src.split('#')[0] : '';
+      if (src && currentFull !== newFull) {
+        if (!isIdle) {
+          // idle→analysis：V48 fix 立即设置 opacity=1 保留当前帧作为桥接，避免被
+          // showMain 抢断。背景：LLM 响应过快时（hi/简单问候 < 1s），segment_ready
+          // 赶在 loopVideo canplay 之前到达，showMain finalize fadeOut currentEl 会
+          // 强制隐藏 loopVideo（opacity=0），用户跳过 thinking 动画直接看到 mainVideo
+          // 播 segment。现在先保留当前帧 (idle)，等 canplay 后再切换到 analysis。
+          loopVideo.style.transition = 'none';
+          loopVideo.style.opacity = '1';
+          loopVideo.style.pointerEvents = 'auto';
           const onLoopReady = () => {
             loopVideo.removeEventListener('canplay', onLoopReady);
             clearLoopSwitchTimer();
             loopVideo.currentTime = 0;
-            loopVideo.style.transition = 'none';
-            loopVideo.style.opacity = '1';
-            loopVideo.style.pointerEvents = 'auto';
             loopVideo.play().catch(() => {});
           };
           loopVideo.addEventListener('canplay', onLoopReady);
@@ -698,79 +719,12 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
             }
           }, 800);
         } else {
-          // 其他切换（含 scale 重置后）
+          // 其他切换
           if (loopHasScale && !mainIsBridge) {
-            // 特例：loopVideo 作为临时桥接（mainVideo 无内容）
-            // 在 mainVideo 预加载 idle，避免清除 loopVideo 导致空白帧
-            // 临时移除 mainVideo 内联 scale(1.7)，idle 不应缩放
-            mainVideo.style.transform = '';
-            mainVideo.style.transformOrigin = '';
-            mainVideo.muted = true;
-            mainVideo.loop = isIdle ? false : true;
-
-            const onMainReady = () => {
-              mainVideo.removeEventListener('canplay', onMainReady);
-              clearLoopSwitchTimer();
-              mainVideo.currentTime = 0;
-              // 交叉淡入淡出：loopVideo → mainVideo（同帧过渡，避免空白）
-              loopVideo.style.transition = 'opacity 0.15s ease';
-              loopVideo.style.opacity = '0';
-              loopVideo.style.pointerEvents = 'none';
-              loopVideo.pause();
-              mainVideo.style.transition = 'opacity 0.15s ease';
-              mainVideo.style.opacity = '1';
-              mainVideo.style.pointerEvents = 'auto';
-              mainVideo.play().catch(() => {});
-              activeElementRef.current = 'main';
-
-              // 清除 loopVideo 旧 segment 数据
-              releaseVideoSrc('loop');
-              loopVideo.removeAttribute('src');
-              loopVideo.load();
-
-              // 后台加载 idle 到 loopVideo，就绪后切回正常循环
-              const switchBackToLoop = () => {
-                assignVideoSrc(loopVideo, src, 'loop', originalSrc);
-                const onLoopReady = () => {
-                  loopVideo.removeEventListener('canplay', onLoopReady);
-                  // 交叉淡化：mainVideo 淡出 + loopVideo 淡入
-                  mainVideo.style.transition = 'opacity 0.15s ease';
-                  mainVideo.style.opacity = '0';
-                  mainVideo.style.pointerEvents = 'none';
-                  mainVideo.pause();
-                  loopVideo.style.transition = 'opacity 0.15s ease';
-                  loopVideo.style.opacity = '1';
-                  loopVideo.style.pointerEvents = 'auto';
-                  loopVideo.play().catch(() => {});
-                  activeElementRef.current = 'loop';
-                  // 恢复 mainVideo 内联 scale，延迟清除 src
-                  mainVideo.style.transform = 'scale(1.7)';
-                  mainVideo.style.transformOrigin = 'center center';
-                  clearMainSrcClearTimer();
-                  window.setTimeout(() => {
-                    releaseVideoSrc('main');
-                    mainVideo.src = '';
-                    mainVideo.load();
-                  }, 200);
-                };
-                loopVideo.addEventListener('canplay', onLoopReady);
-                if (loopVideo.readyState >= 3) onLoopReady();
-                loopSwitchTimerRef.current = window.setTimeout(() => {
-                  if (loopVideo.style.opacity !== '1') onLoopReady();
-                }, 800);
-              };
-              window.setTimeout(switchBackToLoop, 200);
-            };
-
-            mainVideo.addEventListener('canplay', onMainReady);
-            assignVideoSrc(mainVideo, src, 'main', originalSrc);
-            if (mainVideo.readyState >= 3) onMainReady();
-            loopSwitchTimerRef.current = window.setTimeout(() => {
-              if (mainVideo.style.opacity !== '1') onMainReady();
-            }, 800);
+            // V51: 死代码安全网（loopHasScale 通常有 mainIsBridge=true，此分支不可达）
+            if (!mainVideo || !loopVideo) return;
           } else {
-            // V11 修复：标准路径保留 loopVideo 当前帧作为桥接，
-            // 不立即隐藏 loopVideo（避免“hi 后 1-2s 空白”和移动端每段闪烁）。
+            // V11 修复：标准路径
             // 逻辑：保留 loopVideo.opacity 不动（仍显示 idle 帧），
             // 设新 src 等 canplay 后播放新 src（视频元素自动渲染新帧）。
             // 如果 mainVideo 是桥接（segment→idle 切换），等 loopVideo 真正在播后
@@ -808,8 +762,7 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
                   mainVideo.style.pointerEvents = 'none';
                   window.setTimeout(() => {
                     releaseVideoSrc('main');
-                    mainVideo.src = '';
-                    mainVideo.load();
+                    // V48 fix: 不要清空 mainVideo.src！保留给下次 segment 复用
                   }, 200);
                 };
                 const onCanPlayForBridge = () => {
@@ -849,10 +802,12 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
         idleLoopActiveRef.current = true;
         loopVideo.style.opacity = '1';
         loopVideo.style.pointerEvents = 'auto';
-        // 隐藏桥接的 mainVideo
+        // V53 fix: 隐藏桥接的 mainVideo 时**不再暂停**它。
+        // 原因：若此时 play() 路径正在异步加载新 segment 并 attemptPlay，
+        // 暂停 mainVideo 会中断其 play() Promise，导致视频停在首帧。
+        // 仅隐藏（opacity=0）即可达到视觉隐藏效果，保留播放状态供后续无缝衔接。
         if (mainIsBridge) {
           clearMainSrcClearTimer();
-          mainVideo.pause();
           mainVideo.style.transition = 'none';
           mainVideo.style.opacity = '0';
           mainVideo.style.pointerEvents = 'none';
@@ -860,12 +815,15 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
         loopVideo.play().catch(() => {});
       } else {
         // src 相同，直接显示（保持 idle 循环或 analysis）
+        // V48 fix: loopVideo.loop 永远 false，依赖 onLoopTimeUpdate JS 接管循环。
         const isSameIdle = !src.includes('analysis');
-        loopVideo.loop = isSameIdle ? false : true;
+        loopVideo.loop = false;
         idleLoopActiveRef.current = isSameIdle;
         loopVideo.style.opacity = '1';
         loopVideo.style.pointerEvents = 'auto';
-        loopVideo.currentTime = 0;
+        // V52 修复: 不要设置 currentTime=0。首次交互时 captureGesture 刚启动 loopVideo，
+        // seek 到 0 会导致解码重置 → 视觉卡顿；后续交互 video 已在播，seek 到 0 也会跳帧。
+        // src 没变，保持当前播放位置即可。
         // 隐藏桥接的 mainVideo
         if (mainIsBridge) {
           clearMainSrcClearTimer();
@@ -911,16 +869,35 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
         const preloaded = preloadedBlobsRef.current.get(url);
         if (preloaded) {
           preloadedBlobsRef.current.delete(url);
-          // V26: 移除 thinkingModeRef pending 逻辑，立即 showMain
           pendingSrcRef.current = null;
           showMain(preloaded, url);
           return;
         }
 
-        // V26: 移除 thinkingModeRef pending 逻辑，立即 resolve 后 showMain
+        // V53: 无缓存时等待 in-flight 预加载（handleSegmentReady 已发起 preloadVideo），
+        // 而不是从头 resolveVideoSrc（会导致重复下载 + 段间延迟）。
+        // 注意：首段播放时 preloadVideo 未调用，preloadPendingRef 为空，
+        // preloadVideoAsync 会启动新下载 → 可能因服务端未就绪而反复 404 重试 → 卡死。
+        // 首段直接走 resolveVideoSrc 路径（网络直连，更快）。
         pendingSrcRef.current = null;
-        const resolved = await resolveVideoSrc(url);
-        showMain(resolved, url);
+        const isFirstSegment = !preloadPendingRef.current || preloadPendingRef.current.size === 0;
+        if (isFirstSegment) {
+          const resolved = await resolveVideoSrc(url);
+          showMain(resolved, url);
+        } else {
+          const blob = await Promise.race([
+            this.preloadVideoAsync(url),
+            new Promise<string | null>(r => setTimeout(() => r(null), 5000)),
+          ]);
+          if (blob) {
+            preloadedBlobsRef.current.delete(url);
+            showMain(blob, url);
+          } else {
+            console.warn(`[V53] preload 超时，降级为网络直连: ${url}`);
+            const resolved = await resolveVideoSrc(url);
+            showMain(resolved, url);
+          }
+        }
       },
 
       // V4: 预下载下一段视频到 blob 缓存。不切 video.src，
@@ -1111,8 +1088,14 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
         if (!src.includes('analysis')) {
           pendingSrcRef.current = null;
         }
-        const resolved = await resolveVideoSrc(src);
-        showLoop(resolved, src);
+        try {
+          const resolved = await resolveVideoSrc(src);
+          showLoop(resolved, src);
+        } catch (err) {
+          // V48 fix: resolveVideoSrc 可能因网络/IDB 错误失败，降级使用原始 URL
+          console.warn('[AvatarView] playLoop resolveVideoSrc 失败，降级使用原始 URL:', err);
+          showLoop(src, src);
+        }
       },
 
       stop() {
@@ -1165,6 +1148,7 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
         const mainVideo = mainVideoRef.current;
         const loopVideo = loopVideoRef.current;
         if (mainVideo) {
+          // V48 fix: reset() 是显式状态重置（新会话），可安全清空 src
           mainVideo.removeAttribute('src');
           mainVideo.load();
           // V11: 不动 opacity — 保持当前帧可见
@@ -1220,7 +1204,11 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
           const p = el.play();
           if (p && typeof p.then === 'function') {
             p.then(() => {
-              el.pause();
+              // V52: 不再 pause loopVideo，避免 idle 动画停顿造成"卡住"感知。
+              // 只需在用户手势栈中触发一次 play() 即可解锁自动播放策略。
+              if (el !== loopVideoRef.current) {
+                el.pause();
+              }
             }).catch(() => { /* 预捕获失败不影响后续流程 */ });
           }
         });
@@ -1229,16 +1217,22 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
 
     // 主视频播放完毕回调
     const onMainEnded = useCallback(() => {
+      // V50: 防重入 — 同一 segment 只 dispatch 一次
+      if (videoEndedDispatchedRef.current) return;
+      videoEndedDispatchedRef.current = true;
       window.dispatchEvent(new CustomEvent('video-ended'));
     }, []);
 
-    // 循环视频 ended 回调：segment 结束通知父组件；idle 兜底 seek(0) 重播
+    // 循环视频 ended 回调：segment 结束通知父组件；idle/analysis 兜底 seek(0) 重播
     const onLoopEnded = useCallback(() => {
       if (loopIsSegmentRef.current) {
         loopIsSegmentRef.current = false;
+        // V50: 防重入 — 同一 segment 只 dispatch 一次
+        if (videoEndedDispatchedRef.current) return;
+        videoEndedDispatchedRef.current = true;
         window.dispatchEvent(new CustomEvent('video-ended'));
-      } else if (idleLoopActiveRef.current) {
-        // idle 模式：timeupdate 未及时 seek，这里兜底回开头
+      } else {
+        // V48 fix: idle 和 analysis 都兜底 seek(0) 重播（JS 无缝循环未拦截时的安全网）
         const loopVideo = loopVideoRef.current;
         if (loopVideo) {
           loopVideo.currentTime = 0;
@@ -1247,18 +1241,20 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
       }
     }, []);
 
-    // 循环视频 timeupdate：① JS 接管 idle 无缝循环 ② 检查待切换 segment
+    // 循环视频 timeupdate：① JS 接管无缝循环（idle + analysis）② 检查待切换 segment
     const onLoopTimeUpdate = useCallback(() => {
       const loopVideo = loopVideoRef.current;
       if (!loopVideo) return;
 
-      // ① JS 接管 idle 无缝循环：距末尾不到 1 帧时立即 seek 回开头
-      //    首尾帧像素一致（frame 0 = frame 125）→ 视觉零跳变
-      if (idleLoopActiveRef.current && !loopVideo.paused) {
+      // ① V48 fix: JS 无缝循环 — 仅适用于 idle/analysis，**不适用于 segment**。
+      //    segment 视频需要让浏览器原生 ended 触发 video-ended 事件，切下一段或切回 idle。
+      //    如果这里在 segment 快到结尾时 seek 到 0，会让视频视觉上突然跳回开头，
+      //    而 audio 持续播放 → 口型从头循环 ≈ target/4.833 次 → 用户感知「重复读」。
+      if (!loopIsSegmentRef.current && !loopVideo.paused) {
         const timeToEnd = loopVideo.duration - loopVideo.currentTime;
         if (timeToEnd < 0.05) {
           loopVideo.currentTime = 0;
-          return; // 已经处理，不再检查 pending
+          return;
         }
       }
 
@@ -1317,14 +1313,17 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
       <div
         style={{
           position: 'relative',
-          // V37 微信移动端：高度从 32vh 缩小到 20vh（静态图不需要太大）
-          // 桌面端：75vh，靠 aspectRatio 9/16 自动算宽度
-          height: isWeChatMobile ? '20vh' : (isMobile ? '32vh' : '75vh'),
-          maxHeight: '100%',
-          aspectRatio: '9 / 16',
-          maxWidth: '100%',
-          overflow: 'hidden',
+          // V50: avatar 容器高度恢复至 75vh（与 ChatPanel 等高），普兰可见高度 ≈ 75vh × 58.6% = 44vh（ChatPanel 的 59%），
+          // 视觉上接近 2/3。统一 scale(1) 无需 React.memo 保护动态 transform。
+          height: isWeChatMobile ? '160px' : (isMobile ? '267px' : '75vh'),
+          aspectRatio: '3 / 4',
+          maxWidth: '540px',
+          maxHeight: '75vh',
+          minWidth: '300px',
           flexShrink: 0,
+          flexGrow: 0,
+          flexBasis: 'auto',
+          overflow: 'hidden',
           background: '#FFFFFF',
           alignSelf: isMobile ? 'center' : 'auto',
         }}
@@ -1359,7 +1358,17 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
                 width: '100%',
                 height: '100%',
                 objectFit: 'contain',
-                transform: 'scale(1.7)',
+                // V48.4 fix: scale(1) 恢复不裁剪，video 完整 fit 容器。
+                // 背景：scale(1.5) 会让 idle 状态普兰腿部被裁剪（普兰 height 474px in element 522px
+                //   + scale 1.5 transformOrigin center → 普兰 visible content 反而 缩小 到 348px，
+                //   比 scale 1.0 (474px) 还小）。原因：transformOrigin center center 让元素从中心放大，
+                //   但容器裁剪后只显示中间一段，裁剪比例 = 容器/元素_rendered = 522/(474*1.5) = 73%，
+                //   普兰 visible content = 474 * 73% = 348，反而比不放大小。
+                // scale 1.0 保证 video 完整 fit 容器不被裁剪，
+                //   - idle 完整普兰 visible ~70% 容器（最佳观看）
+                //   - segment 特写帧 visible ~40% 容器（接受较小，因 clip 资源限制）
+                //   - segment 完整帧 visible ~70% 容器（与 idle 一致）
+                transform: 'scale(1)',
                 transformOrigin: 'center center',
                 zIndex: 1,
                 opacity: 0,
@@ -1386,6 +1395,10 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
                 width: '100%',
                 height: '100%',
                 objectFit: 'contain',
+                // V51: idle 视频普兰占帧 99.5%，speaking 占 58.6%。
+                // scale(0.589) 缩小 idle 使普兰可见高度匹配 speaking（75vh × 58.6% = 44vh）。
+                transform: 'scale(0.589)',
+                transformOrigin: 'center center',
                 zIndex: 1,
                 opacity: 0,
                 pointerEvents: 'none',
@@ -1408,6 +1421,6 @@ const AvatarView = forwardRef<AvatarViewHandle, AvatarViewProps>(
       </div>
     );
   }
-);
+));
 
 export default AvatarView;
