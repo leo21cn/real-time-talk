@@ -1415,6 +1415,28 @@ const AvatarView = memo(forwardRef<AvatarViewHandle, AvatarViewProps>(
           />
         ) : (
           <>
+            {/* V67: 视频兜底静态图. video 元素失败/error/无 src 时自动显示.
+                永远在视频下面 (zIndex 0), 视频 opacity 0 或 error 时露出来, 视频正常播放时被盖住.
+                避免长回答后 loop video 加载失败导致"卡通形象消失"的空白. */}
+            <img
+              src="/pulan_static.png"
+              alt="普兰 (静态)"
+              draggable={false}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                width: '100%',
+                height: '100%',
+                objectFit: 'contain',
+                // 与 loop video 一致: 缩小到 58.9% 让普兰可见高度匹配 speaking 段
+                transform: 'scale(0.589)',
+                transformOrigin: 'center center',
+                zIndex: 0,
+                userSelect: 'none',
+                WebkitUserSelect: 'none',
+                pointerEvents: 'none',
+              }}
+            />
             {/* 主视频（播放 segment，有声音） */}
             <video
               ref={mainVideoRef}

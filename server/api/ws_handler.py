@@ -13,6 +13,40 @@ from server.models.session import SessionContext, SessionState
 from server.agent.agent_engine import AgentEngine
 from server.agent.conversation_manager import ConversationManager
 from server.rag import build_rag_context
+
+
+async def safe_send_json(ws: WebSocket, payload: dict) -> bool:
+    """
+    V67: 安全发送 WebSocket 消息, 捕获连接已关闭的 RuntimeError.
+
+    背景: 长回答过程中, 客户端可能关闭页面/网络断开, 此时 WS 协程还在线程池里跑
+    pipeline 回调, 会调 send_json. websockets 库在关闭后 send 会抛:
+      RuntimeError: Cannot call "send" once a close message has been sent.
+    之前这个异常会冒到 asyncio.Task 包装, 在生产日志刷一堆 traceback, 但客户端
+    已经断开, 重连后会话可能丢状态. 现在静默丢弃, 但记录一次 WARN 方便追踪.
+
+    Returns: True=成功发送, False=连接已关闭 (调用方无需重试).
+    """
+    try:
+        await ws.send_json(payload)
+        return True
+    except RuntimeError as e:
+        # 连接已关闭: websockets 库明确说 "Cannot call send once a close message has been sent"
+        if "close" in str(e).lower() or "Cannot call" in str(e):
+            logger.debug(f"safe_send_json: 连接已关闭, 丢弃事件 type={payload.get('type', '?')}")
+            return False
+        # 其他 RuntimeError 还是抛出去
+        raise
+    except Exception as e:
+        # 其他异常 (网络断开, 协议错误) 也不应让 pipeline 崩
+        # 但要看一下具体是什么, 短暂 WARN 后丢弃
+        err_name = type(e).__name__
+        if err_name in ('ConnectionClosed', 'ConnectionClosedError', 'ConnectionClosedOK'):
+            logger.debug(f"safe_send_json: 连接已关闭 ({err_name}), 丢弃事件 type={payload.get('type', '?')}")
+            return False
+        logger.warning(f"safe_send_json: 发送失败 {err_name}: {e}, 丢弃事件 type={payload.get('type', '?')}")
+        return False
+
 from server.rag.collections_resolver import resolve_search_collections
 from server.services.llm_client import LlmClient, LlmClientError
 from server.services.redis_client import RedisClient
@@ -88,7 +122,7 @@ class WsHandler:
         session_ctx.ws = ws
 
         # 3. 发送 connected 事件
-        await ws.send_json({
+        await safe_send_json(ws, {
             "type": "connected",
             "session_token": token,
             "state": session_ctx.state.value,
@@ -102,7 +136,7 @@ class WsHandler:
                 try:
                     message = json.loads(raw)
                 except json.JSONDecodeError:
-                    await ws.send_json({
+                    await safe_send_json(ws, {
                         "type": "error",
                         "message": "消息格式错误，需要 JSON",
                     })
@@ -134,7 +168,7 @@ class WsHandler:
         """处理用户消息（流式 LLM → 边生成边 TTS）"""
         text = message.get("text", "").strip()
         if not text:
-            await ws.send_json({
+            await safe_send_json(ws, {
                 "type": "error",
                 "message": "消息不能为空",
             })
@@ -149,7 +183,7 @@ class WsHandler:
         # 事件携带新 seq。客户端按 msg_seq 过滤旧会话的残留事件（避免取消后还未
         # 发送出的 R1 segment_ready 被误认为 R2 的段）。
         session_ctx.msg_seq += 1
-        await ws.send_json({
+        await safe_send_json(ws, {
             "type": "session_reset",
             "msg_seq": session_ctx.msg_seq,
         })
@@ -159,11 +193,11 @@ class WsHandler:
         await self.redis.set_session_state(session_ctx.token, "thinking")
 
         # 立即通知前端进入思考状态（在 LLM 调用前推送）
-        await ws.send_json({
+        await safe_send_json(ws, {
             "type": "play_analysis",
             "loop": True,
         })
-        await ws.send_json({
+        await safe_send_json(ws, {
             "type": "state_change",
             "state": "thinking",
         })
@@ -295,7 +329,7 @@ class WsHandler:
                 return
 
             if not pending_tasks:
-                await ws.send_json({"type": "state_change", "state": "idle"})
+                await safe_send_json(ws, {"type": "state_change", "state": "idle"})
                 return
 
             # Step 5: 等待首段 → 立即推送
@@ -313,7 +347,7 @@ class WsHandler:
                 return
 
             await pipeline._push_segment(first_idx, first_result)
-            await ws.send_json({"type": "state_change", "state": "speaking"})
+            await safe_send_json(ws, {"type": "state_change", "state": "speaking"})
 
             # Step 6: 后续段直接推送（不等 ack）。与 streaming_pipeline.run() V4 优化一致：
             # 段生成完毕后立即推送，客户端自行管理视频播放列表，消除 ack 串行等待延迟。
@@ -338,10 +372,10 @@ class WsHandler:
 
             # Step 7: 全部完成
             if not pipeline._cancel.is_set():
-                await ws.send_json({"type": "response_complete", "total_segments": len(pending_tasks)})
-                await ws.send_json({"type": "all_completed"})
-                await ws.send_json({"type": "return_to_idle"})
-                await ws.send_json({"type": "state_change", "state": "idle"})
+                await safe_send_json(ws, {"type": "response_complete", "total_segments": len(pending_tasks)})
+                await safe_send_json(ws, {"type": "all_completed"})
+                await safe_send_json(ws, {"type": "return_to_idle"})
+                await safe_send_json(ws, {"type": "state_change", "state": "idle"})
 
         except LlmClientError as e:
             logger.error(f"LLM 流式调用失败: {e}")
@@ -408,16 +442,16 @@ class WsHandler:
 
     async def _send_error(self, ws: WebSocket, message: str, pipeline: StreamingPipeline):
         """推送错误并清理 pipeline"""
-        await ws.send_json({"type": "error", "message": message})
-        await ws.send_json({"type": "state_change", "state": "idle"})
+        await safe_send_json(ws, {"type": "error", "message": message})
+        await safe_send_json(ws, {"type": "state_change", "state": "idle"})
         pipeline._cancel.set()
 
     async def _reset_and_error(self, ws: WebSocket, session_ctx: SessionContext, message: str):
         """重置状态并推送错误"""
         session_ctx.state = SessionState.IDLE
         await self.redis.set_session_state(session_ctx.token, "idle")
-        await ws.send_json({"type": "error", "message": message})
-        await ws.send_json({"type": "state_change", "state": "idle"})
+        await safe_send_json(ws, {"type": "error", "message": message})
+        await safe_send_json(ws, {"type": "state_change", "state": "idle"})
 
     async def _handle_ack(self, session_ctx: SessionContext, message: dict):
         """处理前端播放确认"""
@@ -444,7 +478,7 @@ class WsHandler:
         await self.redis.set_session_state(session_ctx.token, "idle")
 
         # 推送状态变更
-        await ws.send_json({
+        await safe_send_json(ws, {
             "type": "state_change",
             "state": "idle",
         })

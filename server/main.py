@@ -155,6 +155,11 @@ async def head_to_get_middleware(request: StarletteRequest, call_next):
                 yield b""
 
         response.body_iterator = empty_body()
+        # V67 fix: FileResponse 走 body_iterator 分支, 必须同时清 Content-Length
+        # 否则 uvicorn 检测到 "Content-Length: 1063194 但实际发 0 字节" 抛 RuntimeError.
+        # 因为下游 nginx 可能会把这个错误冒到 502/504, 间接影响 video 资源预取.
+        if "content-length" in response.headers:
+            response.headers["content-length"] = "0"
     if hasattr(response, "body"):
         # Starlette Response 的 body 是 bytes/str，正常情况 HEAD 路由返回 JSON 错误时
         # body 是 JSON 字符串，必须清空否则违反 HTTP 规范

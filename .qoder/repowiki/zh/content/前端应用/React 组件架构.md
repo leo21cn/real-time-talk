@@ -14,6 +14,12 @@
 - [client/src/types/chat.ts](file://client/src/types/chat.ts)
 </cite>
 
+## 更新摘要
+**变更内容**
+- 新增 AvatarView 组件的 abortPlay() 和 clearAbort() 方法，用于防止错误状态与排队视频操作之间的竞态条件
+- 增强视频播放状态机的防御性机制和错误处理，提升移动端浏览器的稳定性
+- 完善错误处理流程，确保在错误发生时正确中止正在进行的视频播放操作
+
 ## 目录
 1. [简介](#简介)
 2. [项目结构](#项目结构)
@@ -53,8 +59,8 @@ app_tsx --> types_chat["types/chat.ts<br/>消息类型"]
 
 图表来源
 - [client/src/main.tsx:1-13](file://client/src/main.tsx#L1-L13)
-- [client/src/App.tsx:1-326](file://client/src/App.tsx#L1-L326)
-- [client/src/components/AvatarView.tsx:1-594](file://client/src/components/AvatarView.tsx#L1-L594)
+- [client/src/App.tsx:1-985](file://client/src/App.tsx#L1-L985)
+- [client/src/components/AvatarView.tsx:1-1493](file://client/src/components/AvatarView.tsx#L1-L1493)
 - [client/src/components/ChatPanel.tsx:1-200](file://client/src/components/ChatPanel.tsx#L1-L200)
 - [client/src/components/ChatBubble.tsx:1-86](file://client/src/components/ChatBubble.tsx#L1-L86)
 - [client/src/components/ErrorBubble.tsx:1-70](file://client/src/components/ErrorBubble.tsx#L1-L70)
@@ -65,7 +71,7 @@ app_tsx --> types_chat["types/chat.ts<br/>消息类型"]
 
 章节来源
 - [client/src/main.tsx:1-13](file://client/src/main.tsx#L1-L13)
-- [client/src/App.tsx:1-326](file://client/src/App.tsx#L1-L326)
+- [client/src/App.tsx:1-985](file://client/src/App.tsx#L1-L985)
 
 ## 核心组件
 - App 根组件
@@ -75,6 +81,7 @@ app_tsx --> types_chat["types/chat.ts<br/>消息类型"]
 - AvatarView 虚拟形象组件
   - 职责：双 video 叠加切换（主视频用于 segment 播放，循环视频用于 idle/analysis），提供无缝切换与静音过渡，暴露 play/playLoop/stop/isPlaying/getVideoElement 等命令式方法。
   - 事件：内部通过自定义事件 'video-ended' 通知父组件段播放完成。
+  - **新增功能**：V60 版本新增 abortPlay() 和 clearAbort() 方法，用于防止错误状态与排队视频操作之间的竞态条件。
 - ChatPanel 聊天面板组件
   - 职责：展示历史消息、输入框与发送按钮，自动滚动到底部，支持 Enter 发送与输入自适应高度。
   - 事件：通过 onSend 回调向父组件提交文本。
@@ -85,17 +92,18 @@ app_tsx --> types_chat["types/chat.ts<br/>消息类型"]
   - 职责：居中显示错误信息，自动淡出并在指定时间后通知父组件移除。
 
 章节来源
-- [client/src/App.tsx:60-326](file://client/src/App.tsx#L60-L326)
-- [client/src/components/AvatarView.tsx:1-594](file://client/src/components/AvatarView.tsx#L1-L594)
+- [client/src/App.tsx:177-985](file://client/src/App.tsx#L177-L985)
+- [client/src/components/AvatarView.tsx:1-1493](file://client/src/components/AvatarView.tsx#L1-L1493)
 - [client/src/components/ChatPanel.tsx:1-200](file://client/src/components/ChatPanel.tsx#L1-L200)
 - [client/src/components/ChatBubble.tsx:1-86](file://client/src/components/ChatBubble.tsx#L1-L86)
 - [client/src/components/ErrorBubble.tsx:1-70](file://client/src/components/ErrorBubble.tsx#L1-L70)
 
 ## 架构总览
-整体采用“状态提升 + 事件总线 + 命令式 ref”的组合模式：
+整体采用"状态提升 + 事件总线 + 命令式 ref"的组合模式：
 - 状态集中在 App，通过 props 向下传递（ChatPanel），通过 ref 向上暴露能力（AvatarView）。
 - 服务端事件经 useWebSocket Hook 解析后，由 App 统一分发到 UI 状态与媒体播放。
 - 媒体播放通过自定义事件 'video-ended' 从 AvatarView 冒泡至 App，触发 ack 与状态机推进。
+- **V60 增强**：引入 abortPlay/clearAbort 机制防止错误状态下的竞态条件。
 
 ```mermaid
 sequenceDiagram
@@ -116,12 +124,13 @@ APP->>AV : play(video_url)
 AV-->>APP : 自定义事件 video-ended
 APP->>WS : sendAck(segment_index)
 APP->>APP : 根据是否末段决定 Idle/Bridging
+Note over APP,AV : V60 : 错误时调用 abortPlay() 防止竞态
 ```
 
 图表来源
-- [client/src/App.tsx:78-183](file://client/src/App.tsx#L78-L183)
+- [client/src/App.tsx:347-637](file://client/src/App.tsx#L347-L637)
 - [client/src/hooks/useWebSocket.ts:137-157](file://client/src/hooks/useWebSocket.ts#L137-L157)
-- [client/src/components/AvatarView.tsx:463-481](file://client/src/components/AvatarView.tsx#L463-L481)
+- [client/src/components/AvatarView.tsx:1255-1271](file://client/src/components/AvatarView.tsx#L1255-L1271)
 
 ## 详细组件分析
 
@@ -139,13 +148,13 @@ APP->>APP : 根据是否末段决定 Idle/Bridging
   - play_analysis：进入 Bridging，驱动 AvatarView.playLoop(analysis)
   - all_completed：清除 currentSegmentIndex，关闭 isTyping
   - return_to_idle：延迟回 Idle（末段）或立即回 Idle（非末段）
-  - error：清空 isTyping，重置为 Idle，播放 idle 循环
+  - **error：清空 isTyping，重置为 Idle，调用 abortPlay() 防止竞态，播放 idle 循环**
 - 生命周期控制
   - 监听 window 'video-ended'：发送 ack，判断是否末段，决定是否回 Idle
   - 音频解锁：首次交互创建 AudioContext 并尝试恢复，以绕过浏览器自动播放策略
 - 组件通信
   - 向 ChatPanel 传入 messages/onSend/disabled
-  - 通过 ref 调用 AvatarView.play/playLoop/stop
+  - 通过 ref 调用 AvatarView.play/playLoop/stop/abortPlay/clearAbort
 
 ```mermaid
 flowchart TD
@@ -158,20 +167,22 @@ CheckDeferred --> |是| GoIdle["设置 Idle<br/>播放 idle 循环<br/>关闭 is
 CheckDeferred --> |否| KeepFrame["保持最后一帧可见<br/>等待下一段"]
 KeepFrame --> NextSeg["收到下一段 segment_ready"]
 NextSeg --> PlaySeg
+Note over Start,GoIdle: V60: 错误时调用 abortPlay() 防止竞态
 ```
 
 图表来源
-- [client/src/App.tsx:78-183](file://client/src/App.tsx#L78-L183)
-- [client/src/App.tsx:194-220](file://client/src/App.tsx#L194-L220)
+- [client/src/App.tsx:347-637](file://client/src/App.tsx#L347-L637)
+- [client/src/App.tsx:765-828](file://client/src/App.tsx#L765-L828)
 
 章节来源
-- [client/src/App.tsx:60-326](file://client/src/App.tsx#L60-L326)
+- [client/src/App.tsx:177-985](file://client/src/App.tsx#L177-L985)
 - [client/src/types/events.ts:1-113](file://client/src/types/events.ts#L1-L113)
 - [client/src/types/chat.ts:1-11](file://client/src/types/chat.ts#L1-L11)
 
 ### AvatarView 虚拟形象组件
 - 接口设计
   - 暴露方法：play(url)、playLoop(src)、stop()、isPlaying()、getVideoElement()
+  - **V60 新增**：abortPlay()、clearAbort() — 用于防止错误状态与排队视频操作之间的竞态条件
   - Props：idleSrc（默认 idle 循环视频地址）
 - 渲染架构
   - 双 <video> 绝对定位叠加：主视频（segment 播放，有声音）+ 循环视频（idle/analysis，静音）
@@ -184,6 +195,7 @@ NextSeg --> PlaySeg
 - 竞态保护
   - thinkingModeRef：当处于 analysis 或 pending 段时，阻止 segment_ready 直接打断思考动画
   - 超时兜底：5s 内未切换则强制播放 segment
+  - **V60 增强**：playAbortRef 标志防止错误状态下继续执行排队的视频操作
 
 ```mermaid
 classDiagram
@@ -191,8 +203,17 @@ class AvatarView {
 +play(url) void
 +playLoop(src) void
 +stop() void
++reset() void
 +isPlaying() boolean
 +getVideoElement() HTMLVideoElement|null
++preloadVideo(url) void
++consumePreloadedBlob(url) string|null
++preloadVideoAsync(url) Promise<string|null>
++warmupVideoElement(blobUrl) Promise<void>
++clearPreloadedBlobs() void
++captureGesture() void
++abortPlay() void
++clearAbort() void
 -showMain(url) void
 -showLoop(src) void
 -onMainEnded() void
@@ -217,13 +238,13 @@ AvatarView --> LoopVideo : "引用"
 ```
 
 图表来源
-- [client/src/components/AvatarView.tsx:10-21](file://client/src/components/AvatarView.tsx#L10-L21)
-- [client/src/components/AvatarView.tsx:63-150](file://client/src/components/AvatarView.tsx#L63-L150)
-- [client/src/components/AvatarView.tsx:152-405](file://client/src/components/AvatarView.tsx#L152-L405)
-- [client/src/components/AvatarView.tsx:463-504](file://client/src/components/AvatarView.tsx#L463-L504)
+- [client/src/components/AvatarView.tsx:12-42](file://client/src/components/AvatarView.tsx#L12-L42)
+- [client/src/components/AvatarView.tsx:873-1272](file://client/src/components/AvatarView.tsx#L873-L1272)
+- [client/src/components/AvatarView.tsx:353-609](file://client/src/components/AvatarView.tsx#L353-L609)
+- [client/src/components/AvatarView.tsx:612-869](file://client/src/components/AvatarView.tsx#L612-L869)
 
 章节来源
-- [client/src/components/AvatarView.tsx:1-594](file://client/src/components/AvatarView.tsx#L1-L594)
+- [client/src/components/AvatarView.tsx:1-1493](file://client/src/components/AvatarView.tsx#L1-L1493)
 
 ### ChatPanel 聊天面板组件
 - Props 定义
@@ -254,7 +275,7 @@ APP-->>CP : disabled=true
 
 图表来源
 - [client/src/components/ChatPanel.tsx:17-51](file://client/src/components/ChatPanel.tsx#L17-L51)
-- [client/src/App.tsx:224-252](file://client/src/App.tsx#L224-L252)
+- [client/src/App.tsx:765-828](file://client/src/App.tsx#L765-L828)
 
 章节来源
 - [client/src/components/ChatPanel.tsx:1-200](file://client/src/components/ChatPanel.tsx#L1-L200)
@@ -310,7 +331,7 @@ App --> TC["types/chat.ts"]
 ```
 
 图表来源
-- [client/src/App.tsx:1-326](file://client/src/App.tsx#L1-L326)
+- [client/src/App.tsx:1-985](file://client/src/App.tsx#L1-L985)
 - [client/src/hooks/useWebSocket.ts:1-190](file://client/src/hooks/useWebSocket.ts#L1-L190)
 - [client/src/services/api.ts:1-52](file://client/src/services/api.ts#L1-L52)
 - [client/src/components/ChatPanel.tsx:1-200](file://client/src/components/ChatPanel.tsx#L1-L200)
@@ -333,6 +354,7 @@ App --> TC["types/chat.ts"]
 - 媒体播放
   - 预加载与 canplay 时机控制，确保首帧快速呈现
   - idle 模式 JS 接管无缝循环，避免原生 loop 的首尾跳变
+  - **V60 增强**：abortPlay/clearAbort 机制防止错误状态下的资源浪费
 - 网络与连接
   - useWebSocket 指数退避重连，避免雪崩式重连
   - Token 持久化到 sessionStorage，减少重复创建会话开销
@@ -347,31 +369,42 @@ App --> TC["types/chat.ts"]
 - 自动播放策略
   - 现象：头像无声或无法自动播放
   - 排查：确认 unlockAudio 是否在用户交互后调用，AudioContext 是否 resume
-  - 参考路径：[client/src/App.tsx:32-58](file://client/src/App.tsx#L32-L58)
+  - 参考路径：[client/src/App.tsx:152-175](file://client/src/App.tsx#L152-L175)
 - 视频切换闪烁
   - 现象：段间出现黑屏或空白帧
   - 排查：检查 showMain/showLoop 的透明度与 pointerEvents 切换顺序，确认 canplay 与定时器兜底
-  - 参考路径：[client/src/components/AvatarView.tsx:63-150](file://client/src/components/AvatarView.tsx#L63-L150), [client/src/components/AvatarView.tsx:152-405](file://client/src/components/AvatarView.tsx#L152-L405)
+  - 参考路径：[client/src/components/AvatarView.tsx:353-609](file://client/src/components/AvatarView.tsx#L353-L609), [client/src/components/AvatarView.tsx:612-869](file://client/src/components/AvatarView.tsx#L612-L869)
 - 思考动画被跳过
   - 现象：segment_ready 直接打断 analysis 循环
   - 排查：thinkingModeRef 与 pendingSrcRef 是否生效，5s 兜底是否触发
-  - 参考路径：[client/src/components/AvatarView.tsx:408-437](file://client/src/components/AvatarView.tsx#L408-L437)
+  - 参考路径：[client/src/components/AvatarView.tsx:1120-1137](file://client/src/components/AvatarView.tsx#L1120-L1137)
 - 错误提示不消失
   - 现象：错误气泡一直显示
   - 排查：确认 ErrorBubble 的 onDismiss 是否被调用，父组件是否正确清除 errorMessage
-  - 参考路径：[client/src/components/ErrorBubble.tsx:18-35](file://client/src/components/ErrorBubble.tsx#L18-L35), [client/src/App.tsx:254-257](file://client/src/App.tsx#L254-L257)
+  - 参考路径：[client/src/components/ErrorBubble.tsx:18-35](file://client/src/components/ErrorBubble.tsx#L18-L35), [client/src/App.tsx:830-833](file://client/src/App.tsx#L830-L833)
+- **V60 新增：竞态条件问题**
+  - 现象：错误发生后头像仍显示上一段视频帧而非 idle 状态
+  - 排查：确认 error handler 是否正确调用 abortPlay()，showMain 是否检查 playAbortRef 标志
+  - 参考路径：[client/src/App.tsx:614-632](file://client/src/App.tsx#L614-L632), [client/src/components/AvatarView.tsx:354-358](file://client/src/components/AvatarView.tsx#L354-L358)
+- **V60 新增：abort 标志未清理**
+  - 现象：新一轮对话无法正常播放视频
+  - 排查：确认 handleSend 是否正确调用 clearAbort() 清理上一轮的 abort 标志
+  - 参考路径：[client/src/App.tsx:773-778](file://client/src/App.tsx#L773-L778)
 
 章节来源
 - [client/src/hooks/useWebSocket.ts:118-135](file://client/src/hooks/useWebSocket.ts#L118-L135)
-- [client/src/App.tsx:32-58](file://client/src/App.tsx#L32-L58)
-- [client/src/components/AvatarView.tsx:63-150](file://client/src/components/AvatarView.tsx#L63-L150)
-- [client/src/components/AvatarView.tsx:152-405](file://client/src/components/AvatarView.tsx#L152-L405)
-- [client/src/components/AvatarView.tsx:408-437](file://client/src/components/AvatarView.tsx#L408-L437)
+- [client/src/App.tsx:152-175](file://client/src/App.tsx#L152-L175)
+- [client/src/components/AvatarView.tsx:353-609](file://client/src/components/AvatarView.tsx#L353-L609)
+- [client/src/components/AvatarView.tsx:612-869](file://client/src/components/AvatarView.tsx#L612-L869)
+- [client/src/components/AvatarView.tsx:1120-1137](file://client/src/components/AvatarView.tsx#L1120-L1137)
 - [client/src/components/ErrorBubble.tsx:18-35](file://client/src/components/ErrorBubble.tsx#L18-L35)
-- [client/src/App.tsx:254-257](file://client/src/App.tsx#L254-L257)
+- [client/src/App.tsx:830-833](file://client/src/App.tsx#L830-L833)
+- [client/src/App.tsx:614-632](file://client/src/App.tsx#L614-L632)
+- [client/src/components/AvatarView.tsx:354-358](file://client/src/components/AvatarView.tsx#L354-L358)
+- [client/src/App.tsx:773-778](file://client/src/App.tsx#L773-L778)
 
 ## 结论
-RealTimeTalk 的前端采用清晰的分层与职责划分：App 作为协调器集中管理状态与事件，AvatarView 与 ChatPanel 分别专注媒体播放与对话交互。通过状态提升、命令式 ref 与自定义事件，实现了复杂的多媒体与实时通信场景下的稳定体验。结合 memoization、预加载与无缝循环等技术，保证了流畅的视觉效果与良好的性能表现。
+RealTimeTalk 的前端采用清晰的分层与职责划分：App 作为协调器集中管理状态与事件，AvatarView 与 ChatPanel 分别专注媒体播放与对话交互。通过状态提升、命令式 ref 与自定义事件，实现了复杂的多媒体与实时通信场景下的稳定体验。**V60 版本的增强进一步提升了系统的健壮性，通过 abortPlay/clearAbort 机制有效防止了错误状态与排队视频操作之间的竞态条件，显著改善了移动端浏览器的稳定性**。结合 memoization、预加载与无缝循环等技术，保证了流畅的视觉效果与良好的性能表现。
 
 [本节为总结性内容，不直接分析具体文件]
 
@@ -383,12 +416,13 @@ RealTimeTalk 的前端采用清晰的分层与职责划分：App 作为协调器
 
 章节来源
 - [client/src/main.tsx:8-12](file://client/src/main.tsx#L8-L12)
-- [client/src/App.tsx:21-24](file://client/src/App.tsx#L21-L24)
+- [client/src/App.tsx:30-45](file://client/src/App.tsx#L30-L45)
 
 ### 自定义选项
 - AvatarView
   - idleSrc：可配置 idle 循环视频地址
   - 命令式方法：play/playLoop/stop/isPlaying/getVideoElement
+  - **V60 新增**：abortPlay/clearAbort — 用于手动控制视频播放的中止与恢复
 - ChatPanel
   - disabled：可禁用输入与发送
   - onSend：自定义发送逻辑（例如接入不同后端或添加本地日志）
@@ -396,7 +430,7 @@ RealTimeTalk 的前端采用清晰的分层与职责划分：App 作为协调器
   - message/onDismiss：可自定义错误提示样式与自动消失时长
 
 章节来源
-- [client/src/components/AvatarView.tsx:10-21](file://client/src/components/AvatarView.tsx#L10-L21)
+- [client/src/components/AvatarView.tsx:12-42](file://client/src/components/AvatarView.tsx#L12-L42)
 - [client/src/components/ChatPanel.tsx:11-15](file://client/src/components/ChatPanel.tsx#L11-L15)
 - [client/src/components/ErrorBubble.tsx:10-13](file://client/src/components/ErrorBubble.tsx#L10-L13)
 
@@ -409,10 +443,15 @@ RealTimeTalk 的前端采用清晰的分层与职责划分：App 作为协调器
   - 在 App 中调整 ANALYSIS_SRC/IDLE_SRC 指向新的视频资源
 - 自定义重连策略
   - 在 useWebSocket 中调整 RECONNECT_BASE_MS/RECONNECT_MAX_MS/RECONNECT_MULTIPLIER
+- **V60 新增：自定义竞态保护**
+  - 可通过重写 abortPlay/clearAbort 逻辑来自定义错误处理策略
+  - 在 showMain 中添加额外的竞态检查条件
 
 章节来源
 - [client/src/types/events.ts:83-92](file://client/src/types/events.ts#L83-L92)
-- [client/src/App.tsx:87-183](file://client/src/App.tsx#L87-L183)
+- [client/src/App.tsx:525-637](file://client/src/App.tsx#L525-L637)
 - [client/src/types/chat.ts:4-10](file://client/src/types/chat.ts#L4-L10)
-- [client/src/App.tsx:21-24](file://client/src/App.tsx#L21-L24)
+- [client/src/App.tsx:30-45](file://client/src/App.tsx#L30-L45)
 - [client/src/hooks/useWebSocket.ts:16-19](file://client/src/hooks/useWebSocket.ts#L16-L19)
+- [client/src/components/AvatarView.tsx:1255-1271](file://client/src/components/AvatarView.tsx#L1255-L1271)
+- [client/src/components/AvatarView.tsx:354-358](file://client/src/components/AvatarView.tsx#L354-L358)
