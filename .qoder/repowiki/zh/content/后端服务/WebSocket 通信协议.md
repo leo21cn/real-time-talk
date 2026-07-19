@@ -20,11 +20,10 @@
 
 ## 更新摘要
 **变更内容**
-- 新增 V17 消息序列跟踪机制，防止会话重置竞态条件
-- 优化流式处理机制，实现立即推送 segment_ready 无需等待 ack
-- 新增 response_complete 事件类型，携带总段数信息
-- 新增 session_reset 事件，标记新会话开始并携带 msg_seq
-- 改进前后端事件处理流程，增强状态同步可靠性
+- 增强WebSocket流式处理机制，新增消息序列跟踪(msg_seq)用于过滤旧会话残留事件
+- 改进segment_pending事件支持MP4和WebM双格式URL，提升跨平台兼容性
+- 增强错误处理和连接管理，优化异常恢复机制
+- 完善V17消息序列跟踪机制，彻底解决会话重置竞态条件问题
 
 ## 目录
 1. [简介](#简介)
@@ -41,7 +40,7 @@
 ## 简介
 本技术文档面向 RealTimeTalk 的 WebSocket 实时通信协议，覆盖连接建立与认证、双向消息格式、事件处理流程、断线重连策略、错误处理与心跳检测（实现现状与建议）、以及前后端交互序列图。同时提供与 React 前端的集成模式、性能优化技巧与安全注意事项，帮助初学者快速上手，也为有经验的开发者提供深入的技术细节。
 
-**最新更新**：V17版本引入了消息序列跟踪机制，通过`msg_seq`字段防止会话重置时的竞态条件；优化了流式处理策略，实现立即推送segment_ready无需等待ack确认；新增response_complete事件类型携带总段数信息，提升状态同步的可靠性。
+**最新更新**：V17版本引入了增强的消息序列跟踪机制，通过`msg_seq`字段防止会话重置时的竞态条件；改进了segment_pending事件支持MP4和WebM双格式URL，提升跨平台兼容性；增强了错误处理和连接管理机制，确保系统稳定性。
 
 ## 项目结构
 后端基于 FastAPI，提供 REST API 与 WebSocket 端点；前端使用 React + TypeScript，通过自定义 Hook 管理 WebSocket 连接、自动重连与事件分发。关键路径如下：
@@ -89,7 +88,7 @@ Pipe --> Gen
 WSH --> Redis
 ```
 
-图表来源
+**图表来源**
 - [server/main.py:146-170](file://server/main.py#L146-L170)
 - [server/api/ws_handler.py:31-129](file://server/api/ws_handler.py#L31-L129)
 - [server/models/session.py:14-41](file://server/models/session.py#L14-L41)
@@ -104,7 +103,7 @@ WSH --> Redis
 - [client/src/App.tsx:1-725](file://client/src/App.tsx#L1-L725)
 - [client/src/services/api.ts:1-52](file://client/src/services/api.ts#L1-L52)
 
-章节来源
+**章节来源**
 - [server/main.py:113-191](file://server/main.py#L113-L191)
 - [client/src/hooks/useWebSocket.ts:1-190](file://client/src/hooks/useWebSocket.ts#L1-L190)
 
@@ -112,12 +111,13 @@ WSH --> Redis
 - 会话与会话状态
   - SessionContext 保存 token、当前状态、对话管理器、活跃 Pipeline 和 WebSocket 引用。
   - SessionState 枚举包含 idle、thinking、speaking、bridging。
-  - **V17新增**：msg_seq 字段用于消息序列跟踪，防止会话重置竞态条件。
+  - **V17增强**：msg_seq 字段用于消息序列跟踪，防止会话重置竞态条件。
 - 对话历史管理
   - ConversationManager 维护消息列表、Redis 持久化、Token 溢出智能摘要。
 - 流式分段与推送
   - StreamingPipeline 负责分句切段、并行生成、首段立即推送、逐段确认式推送、打字机气泡动画。
-  - **V17优化**：所有推送事件携带 msg_seq 字段，客户端据此过滤旧会话残留事件。
+  - **V17增强**：所有推送事件携带 msg_seq 字段，客户端据此过滤旧会话残留事件。
+  - **V46增强**：segment_pending 事件支持 MP4 优先的 URL 策略，webm 作为回退方案。
   - **V4优化**：立即推送 segment_ready 无需等待 ack，消除串行等待延迟。
 - 单段生成器
   - SegmentGenerator 串联 TTS、语义分析、FFmpeg 拼接、MinIO 上传（失败回退本地）。
@@ -128,7 +128,7 @@ WSH --> Redis
 - 前端事件处理
   - App.tsx 实现完整的事件处理逻辑，包括 V17 消息序列过滤、V20 response_complete 处理。
 
-章节来源
+**章节来源**
 - [server/models/session.py:14-41](file://server/models/session.py#L14-L41)
 - [server/agent/conversation_manager.py:21-139](file://server/agent/conversation_manager.py#L21-L139)
 - [server/pipeline/streaming_pipeline.py:16-214](file://server/pipeline/streaming_pipeline.py#L16-L214)
@@ -140,7 +140,7 @@ WSH --> Redis
 ## 架构总览
 RealTimeTalk 的实时通信由"REST 创建会话 → WebSocket 认证与双向通信"组成。前端在首次使用时调用 REST 接口创建会话并获取 token，随后以该 token 作为查询参数建立 WebSocket 连接。服务端校验 token 是否存在于 Redis，若存在则恢复会话上下文，否则拒绝连接。连接成功后，服务端推送 connected 事件，随后进入消息循环，根据消息类型进行用户消息处理、播放确认、取消等操作。
 
-**V17重大改进**：引入消息序列跟踪机制，每个 user_message 分配唯一 msg_seq，所有推送事件携带此序号，客户端据此丢弃旧会话残留事件，彻底解决会话重置竞态条件问题。
+**V17重大增强**：引入增强的消息序列跟踪机制，每个 user_message 分配唯一 msg_seq，所有推送事件携带此序号，客户端据此丢弃旧会话残留事件，彻底解决会话重置竞态条件问题。
 
 ```mermaid
 sequenceDiagram
@@ -167,6 +167,7 @@ H->>H : "msg_seq++ + session_reset(msg_seq)"
 H->>P : "run(full_reply_text, msg_seq)"
 P->>G : "generate(segment, index)"
 G-->>P : "SegmentResult"
+P-->>FE : "segment_pending(index, mp4_url, msg_seq)"
 P-->>FE : "segment_ready(index, video_url, duration_ms, text, msg_seq)"
 P-->>FE : "state_change(speaking/idle/thinking)"
 FE-->>H : "ack_played(segment_index)"
@@ -178,7 +179,7 @@ end
 end
 ```
 
-图表来源
+**图表来源**
 - [server/main.py:146-170](file://server/main.py#L146-L170)
 - [server/api/ws_handler.py:49-129](file://server/api/ws_handler.py#L49-L129)
 - [server/services/redis_client.py:108-111](file://server/services/redis_client.py#L108-L111)
@@ -212,11 +213,11 @@ UpdateRef --> SendConnected["推送 connected 事件"]
 SendConnected --> Loop["进入消息循环"]
 ```
 
-图表来源
+**图表来源**
 - [server/api/ws_handler.py:49-95](file://server/api/ws_handler.py#L49-L95)
 - [server/services/redis_client.py:108-111](file://server/services/redis_client.py#L108-L111)
 
-章节来源
+**章节来源**
 - [server/main.py:146-170](file://server/main.py#L146-L170)
 - [server/api/ws_handler.py:49-129](file://server/api/ws_handler.py#L49-L129)
 - [client/src/hooks/useWebSocket.ts:68-117](file://client/src/hooks/useWebSocket.ts#L68-L117)
@@ -229,20 +230,26 @@ SendConnected --> Loop["进入消息循环"]
   - cancel：用户中断当前生成流程。
 - 服务端事件类型
   - connected：连接成功，附带 session_token 与当前 state。
-  - **V17新增**：session_reset：新会话开始，携带新 msg_seq，客户端据此过滤旧事件。
+  - **V17增强**：session_reset：新会话开始，携带新 msg_seq，客户端据此过滤旧事件。
   - state_change：状态变更（thinking/speaking/bridging/idle）。
   - segment_ready：段落就绪，包含 index、video_url、duration_ms、text、msg_seq。
+  - **V46增强**：segment_pending：段落预加载，支持 MP4/WebM 双格式 URL。
   - bubble_char/bubble_dismiss：打字机效果字符推送与气泡消失。
   - play_analysis：衔接动画提示（如思考手势）。
-  - **V20新增**：response_complete：响应完成，携带 total_segments 总段数。
+  - **V20增强**：response_complete：响应完成，携带 total_segments 总段数。
   - all_completed/return_to_idle：全部完成与回到待机。
   - error：错误信息。
 
-**V17消息序列跟踪机制**：
+**V17消息序列跟踪机制增强**：
 - 每次收到 user_message，服务端自增 msg_seq 并推送 session_reset 事件。
-- 所有后续推送事件（segment_ready、state_change等）都携带 msg_seq 字段。
+- 所有后续推送事件（segment_ready、state_change、segment_pending等）都携带 msg_seq 字段。
 - 客户端记录最新 msg_seq，丢弃 msg_seq < currentMsgSeqRef 的旧事件。
 - 有效防止 R1 取消后未发出的 segment_ready 被误认为 R2 的段。
+
+**V46双格式URL支持**：
+- segment_pending 事件推送 MP4 URL（PC浏览器优先H.264硬解）。
+- segment_ready 事件同时推送 video_url_webm 和 video_url_mp4 两个URL。
+- 客户端根据 prefersMp4() 选择最优格式，MP4不存在时自动回退到 WebM。
 
 ```mermaid
 classDiagram
@@ -275,8 +282,16 @@ class ServerSegmentReady {
 +type = "segment_ready"
 +index : number
 +video_url : string
++video_url_webm : string
++video_url_mp4 : string
 +duration_ms : number
 +text : string
++msg_seq : number
+}
+class ServerSegmentPending {
++type = "segment_pending"
++index : number
++video_url : string
 +msg_seq : number
 }
 class ServerBubbleChar {
@@ -315,12 +330,12 @@ class ServerError {
 }
 ```
 
-图表来源
+**图表来源**
 - [client/src/types/events.ts:15-117](file://client/src/types/events.ts#L15-L117)
 - [server/api/ws_handler.py:90-120](file://server/api/ws_handler.py#L90-L120)
 - [server/pipeline/streaming_pipeline.py:132-168](file://server/pipeline/streaming_pipeline.py#L132-L168)
 
-章节来源
+**章节来源**
 - [client/src/types/events.ts:1-138](file://client/src/types/events.ts#L1-L138)
 - [server/api/ws_handler.py:90-120](file://server/api/ws_handler.py#L90-L120)
 - [server/pipeline/streaming_pipeline.py:132-168](file://server/pipeline/streaming_pipeline.py#L132-L168)
@@ -328,18 +343,19 @@ class ServerError {
 ### 双向通信协议与实时数据推送
 - 用户消息处理
   - 收到 user_message 后，服务端立即设置 thinking 状态并推送 play_analysis 与 state_change(thinking)。
-  - **V17新增**：自增 msg_seq 并推送 session_reset 事件，标记新会话开始。
+  - **V17增强**：自增 msg_seq 并推送 session_reset 事件，标记新会话开始。
   - 启动后台流式任务：LLM 边生成边识别句子边界，满长度即启动一段生成任务。
+  - **V46增强**：首段完成后立即推送 segment_pending（MP4 URL），然后推送 segment_ready。
   - 首段完成后立即推送 segment_ready 与 state_change(speaking)，后续段等待 ack_played 确认后推送。
   - **V4优化**：改为立即推送 segment_ready 无需等待 ack，消除串行等待延迟。
 - 播放确认与取消
   - ack_played：前端每播放完一段，发送确认，服务端继续推送下一段。
   - cancel：中断当前 Pipeline，重置状态为 idle。
-- **V20新增**：response_complete 事件
+- **V20增强**：response_complete 事件
   - 所有段推送完毕后发送，携带 total_segments 总段数。
   - 客户端据此确认视频播放列表完整，可在最后一段视频结束后切 idle。
 
-**V17会话重置竞态条件解决方案**：
+**V17会话重置竞态条件解决方案增强**：
 ```mermaid
 sequenceDiagram
 participant FE as "前端"
@@ -364,13 +380,13 @@ P-->>FE : "segment_ready(0, msg_seq=2)"
 FE->>FE : "处理 : 2 >= 2 ✓"
 ```
 
-图表来源
+**图表来源**
 - [server/api/ws_handler.py:130-341](file://server/api/ws_handler.py#L130-L341)
 - [server/pipeline/streaming_pipeline.py:44-131](file://server/pipeline/streaming_pipeline.py#L44-L131)
 - [server/pipeline/segment_generator.py:42-138](file://server/pipeline/segment_generator.py#L42-L138)
 - [client/src/App.tsx:309-318](file://client/src/App.tsx#L309-L318)
 
-章节来源
+**章节来源**
 - [server/api/ws_handler.py:130-341](file://server/api/ws_handler.py#L130-L341)
 - [server/pipeline/streaming_pipeline.py:44-131](file://server/pipeline/streaming_pipeline.py#L44-L131)
 
@@ -392,11 +408,11 @@ F --> G["new WebSocket(wsUrl)"]
 G --> H["onopen 重置重试计数"]
 ```
 
-图表来源
+**图表来源**
 - [client/src/hooks/useWebSocket.ts:95-135](file://client/src/hooks/useWebSocket.ts#L95-L135)
 - [client/src/hooks/useWebSocket.ts:46-65](file://client/src/hooks/useWebSocket.ts#L46-L65)
 
-章节来源
+**章节来源**
 - [client/src/hooks/useWebSocket.ts:95-135](file://client/src/hooks/useWebSocket.ts#L95-L135)
 - [server/services/redis_client.py:112-116](file://server/services/redis_client.py#L112-L116)
 
@@ -405,12 +421,14 @@ G --> H["onopen 重置重试计数"]
   - JSON 解析失败：推送 error 事件并继续循环。
   - LLM 调用失败：重置状态为 idle，推送 error 与 state_change。
   - 管道异常：推送 error 与 state_change(idle)。
+  - **V17增强**：所有错误事件携带 msg_seq 字段，便于客户端正确过滤。
 - 前端错误
   - 连接失败：记录日志并调度重连。
   - 消息解析失败：打印警告并忽略。
-  - **V17新增**：旧会话事件过滤：丢弃 msg_seq < currentMsgSeqRef 的事件。
+  - **V17增强**：旧会话事件过滤：丢弃 msg_seq < currentMsgSeqRef 的事件。
+  - **V46增强**：MP4/WebM 双格式URL回退机制，确保视频可用性。
 
-章节来源
+**章节来源**
 - [server/api/ws_handler.py:101-129](file://server/api/ws_handler.py#L101-L129)
 - [server/api/ws_handler.py:335-341](file://server/api/ws_handler.py#L335-L341)
 - [server/pipeline/streaming_pipeline.py:127-131](file://server/pipeline/streaming_pipeline.py#L127-L131)
@@ -452,12 +470,12 @@ SG --> VC["VideoConcat"]
 SG --> MC
 ```
 
-图表来源
+**图表来源**
 - [server/api/ws_handler.py:31-47](file://server/api/ws_handler.py#L31-L47)
 - [server/pipeline/streaming_pipeline.py:16-43](file://server/pipeline/streaming_pipeline.py#L16-L43)
 - [server/pipeline/segment_generator.py:27-41](file://server/pipeline/segment_generator.py#L27-L41)
 
-章节来源
+**章节来源**
 - [server/api/ws_handler.py:31-47](file://server/api/ws_handler.py#L31-L47)
 - [server/pipeline/streaming_pipeline.py:16-43](file://server/pipeline/streaming_pipeline.py#L16-L43)
 - [server/pipeline/segment_generator.py:27-41](file://server/pipeline/segment_generator.py#L27-L41)
@@ -466,10 +484,12 @@ SG --> MC
 - 首段跳过 LLM 语义分析：减少首段延迟，提升用户体验。
 - 并行生成多段：利用 asyncio.ensure_future 并发执行各段生成任务。
 - **V4优化**：立即推送 segment_ready 无需等待 ack，消除串行等待延迟。
+- **V46优化**：segment_pending 提前预加载 MP4 URL，提升首帧渲染速度。
 - 打字机动画速率限制：单字间隔 15ms~50ms，总时长不超过视频时长的 60%。
 - MinIO 上传失败回退本地：提高鲁棒性。
 - **V17优化**：消息序列跟踪避免竞态条件，提升状态同步可靠性。
 - **V20优化**：response_complete 事件提供总段数信息，改善状态切换时机。
+- **V46优化**：MP4/WebM 双格式支持，PC端优先H.264硬解，移动端自动回退VP9。
 - 建议：
   - 引入连接池与限流，控制并发段数。
   - 对长文本进行更精细的分句策略，平衡首段速度与完整性。
@@ -483,14 +503,16 @@ SG --> MC
   - 消息格式错误：JSON 解析失败。检查前端发送的消息结构。
   - 视频无法播放：MinIO 不可达或 presigned URL 失效。检查媒体代理路径与权限。
   - 重连风暴：网络抖动导致频繁断开。调整重连退避策略与上限。
-  - **V17新增**：事件丢失或错乱：检查 msg_seq 过滤逻辑是否正确。
+  - **V17增强**：事件丢失或错乱：检查 msg_seq 过滤逻辑是否正确。
+  - **V46增强**：视频格式问题：检查 MP4/WebM 双格式回退机制是否正常工作。
 - 定位方法
   - 查看服务端日志：关注 LLM 调用、TTS、FFmpeg、MinIO 的错误堆栈。
   - 前端控制台：观察 WebSocket 连接状态与事件分发。
   - Redis 键值：检查 session:{token}:state 与 history 列表。
   - **V17调试**：检查 console.log 输出 `[V17] 丢弃旧会话残留 segment_ready` 日志。
+  - **V46调试**：检查浏览器控制台关于 MP4/WebM 格式选择的日志。
 
-章节来源
+**章节来源**
 - [server/api/ws_handler.py:101-129](file://server/api/ws_handler.py#L101-L129)
 - [server/api/ws_handler.py:335-341](file://server/api/ws_handler.py#L335-L341)
 - [server/pipeline/streaming_pipeline.py:127-131](file://server/pipeline/streaming_pipeline.py#L127-L131)
@@ -498,7 +520,7 @@ SG --> MC
 - [client/src/App.tsx:313-318](file://client/src/App.tsx#L313-L318)
 
 ## 结论
-RealTimeTalk 的 WebSocket 协议围绕"REST 创建会话 + WebSocket 双向通信"展开，具备完善的连接认证、流式分段生成与确认式推送机制。V17版本引入的消息序列跟踪机制有效解决了会话重置竞态条件问题，V4优化的立即推送策略消除了串行等待延迟，V20的response_complete事件提升了状态同步的可靠性。前端通过 Hook 管理连接与重连，后端通过 Pipeline 协调多服务协作。建议在现有基础上补充心跳检测、连接保活与更细粒度的错误分类，以提升稳定性与用户体验。
+RealTimeTalk 的 WebSocket 协议围绕"REST 创建会话 + WebSocket 双向通信"展开，具备完善的连接认证、流式分段生成与确认式推送机制。V17版本引入的增强消息序列跟踪机制有效解决了会话重置竞态条件问题，V4优化的立即推送策略消除了串行等待延迟，V20的response_complete事件提升了状态同步的可靠性，V46的双格式URL支持确保了跨平台兼容性。前端通过 Hook 管理连接与重连，后端通过 Pipeline 协调多服务协作。建议在现有基础上补充心跳检测、连接保活与更细粒度的错误分类，以提升稳定性与用户体验。
 
 [本节为总结，不直接分析具体文件]
 
@@ -511,13 +533,14 @@ RealTimeTalk 的 WebSocket 协议围绕"REST 创建会话 + WebSocket 双向通�
   - cancel{}
 - 服务端事件
   - connected{session_token, state}
-  - **V17新增**：session_reset{msg_seq}
+  - **V17增强**：session_reset{msg_seq}
   - state_change{state, msg_seq}
-  - segment_ready{index, video_url, duration_ms, text, msg_seq}
+  - segment_ready{index, video_url, video_url_webm, video_url_mp4, duration_ms, text, msg_seq}
+  - **V46增强**：segment_pending{index, video_url, msg_seq}
   - bubble_char{char, segment_index, msg_seq}
   - bubble_dismiss{segment_index, msg_seq}
   - play_analysis{loop, msg_seq}
-  - **V20新增**：response_complete{total_segments, msg_seq}
+  - **V20增强**：response_complete{total_segments, msg_seq}
   - all_completed{msg_seq}
   - return_to_idle{msg_seq}
   - error{message, msg_seq}
@@ -527,7 +550,13 @@ RealTimeTalk 的 WebSocket 协议围绕"REST 创建会话 + WebSocket 双向通�
 - 作用：客户端据此丢弃旧会话残留事件，防止竞态条件
 - 过滤规则：event.msg_seq < currentMsgSeqRef 时丢弃事件
 
-章节来源
+**V46双格式URL支持说明**：
+- video_url：首选URL（MP4优先，不存在则WebM）
+- video_url_webm：WebM格式URL（VP9编码，移动端兼容性好）
+- video_url_mp4：MP4格式URL（H.264编码，PC端硬解性能好）
+- segment_pending.video_url：MP4格式URL（用于预加载）
+
+**章节来源**
 - [client/src/types/events.ts:15-117](file://client/src/types/events.ts#L15-L117)
 - [server/api/ws_handler.py:90-120](file://server/api/ws_handler.py#L90-L120)
 - [server/pipeline/streaming_pipeline.py:132-168](file://server/pipeline/streaming_pipeline.py#L132-L168)
@@ -541,8 +570,9 @@ RealTimeTalk 的 WebSocket 协议围绕"REST 创建会话 + WebSocket 双向通�
   - 在服务端捕获特定服务异常（如 TTS、FFmpeg），统一转换为 error 事件并重置状态。
   - 在前端 Hook 中增加 onEvent 的类型守卫，针对未知事件类型进行告警与降级。
   - **V17增强**：实现 msg_seq 过滤逻辑，丢弃旧会话残留事件。
+  - **V46增强**：实现 MP4/WebM 双格式URL回退逻辑。
 
-章节来源
+**章节来源**
 - [client/src/types/events.ts:83-92](file://client/src/types/events.ts#L83-L92)
 - [server/api/ws_handler.py:101-129](file://server/api/ws_handler.py#L101-L129)
 - [server/pipeline/streaming_pipeline.py:127-131](file://server/pipeline/streaming_pipeline.py#L127-L131)
@@ -553,11 +583,12 @@ RealTimeTalk 的 WebSocket 协议围绕"REST 创建会话 + WebSocket 双向通�
 - ChatPanel 组件负责输入与发送，通过 onSend 回调调用 sendMessage。
 - App.tsx 实现完整的事件处理逻辑：
   - connected：初始化或恢复会话状态。
-  - **V17新增**：session_reset：更新 currentMsgSeqRef，过滤旧事件。
+  - **V17增强**：session_reset：更新 currentMsgSeqRef，过滤旧事件。
   - state_change：驱动 UI 显示思考/说话/待机状态。
+  - **V46增强**：segment_pending：预加载 MP4 URL，提升首帧渲染速度。
   - segment_ready：加入消息队列并按序播放，携带 msg_seq 过滤。
   - bubble_char/bubble_dismiss：实现打字机效果。
-  - **V20新增**：response_complete：记录总段数，优化 idle 切换时机。
+  - **V20增强**：response_complete：记录总段数，优化 idle 切换时机。
   - error：展示错误提示并允许重试。
 
 **V17集成要点**：
@@ -566,7 +597,12 @@ RealTimeTalk 的 WebSocket 协议围绕"REST 创建会话 + WebSocket 双向通�
 - 处理所有其他事件前检查 event.msg_seq >= currentMsgSeqRef
 - 丢弃不符合条件的旧事件并记录警告日志
 
-章节来源
+**V46集成要点**：
+- 处理 segment_pending 事件时预加载 MP4 URL
+- 处理 segment_ready 事件时优先使用 MP4 URL，不存在则回退到 WebM
+- 实现 prefersMp4() 函数判断设备是否支持 H.264 硬解
+
+**章节来源**
 - [client/src/hooks/useWebSocket.ts:34-189](file://client/src/hooks/useWebSocket.ts#L34-L189)
 - [client/src/components/ChatPanel.tsx:17-200](file://client/src/components/ChatPanel.tsx#L17-L200)
 - [client/src/types/chat.ts:1-11](file://client/src/types/chat.ts#L1-L11)
@@ -578,8 +614,9 @@ RealTimeTalk 的 WebSocket 协议围绕"REST 创建会话 + WebSocket 双向通�
 - 媒体访问：使用服务端代理路径访问视频片段，避免浏览器直连 MinIO 暴露凭证。
 - 密钥管理：配置文件中的 API Key 不应提交至版本库，建议使用环境变量或密钥管理服务。
 - **V17安全增强**：消息序列跟踪防止恶意构造的旧事件干扰正常会话。
+- **V46安全增强**：双格式URL支持不影响安全性，仍通过服务端代理访问。
 
-章节来源
+**章节来源**
 - [server/main.py:120-127](file://server/main.py#L120-L127)
 - [server/api/ws_handler.py:57-74](file://server/api/ws_handler.py#L57-L74)
 - [server/pipeline/streaming_pipeline.py:132-145](file://server/pipeline/streaming_pipeline.py#L132-L145)

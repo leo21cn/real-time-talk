@@ -222,6 +222,16 @@ export default function App() {
   // V49: 记录本轮对话已收到的 segment index，防止客户端重复消费同一 segment_ready 事件
   const receivedSegmentIndicesRef = useRef<Set<number>>(new Set());
 
+  // V64: messages 的同步 ref，供 tryGoIdle 等场景读取最新消息 (避免 React state 异步)
+  const messagesRef = useRef<ChatMessage[]>([]);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  // V64: tryGoIdle 的 ref, 让 useEffect (在 messages 变化时) 能调用它
+  // (避免 useEffect 必须在 tryGoIdle 之后定义的顺序约束)
+  const tryGoIdleRef = useRef<(() => void) | null>(null);
+
   useEffect(() => {
     currentSegmentIndexRef.current = currentSegmentIndex;
   }, [currentSegmentIndex]);
@@ -352,6 +362,15 @@ export default function App() {
     }
     receivedSegmentIndicesRef.current.add(index);
 
+    // V59 fix: 防御性检查 — 如果 state 已经是 Idle，说明 error 已发生 / 旧会话
+    // 残留，这条 segment_ready 是无效的（之前的 segment 还没播完就触发了错误
+    // 恢复）。如果不丢弃，前面的 showMain() 会继续完成，在 main 上加载 segment，
+    // 把 avatar 视觉从 idle 切回 segment 帧，造成用户报"说一句话后没切到等待动画"。
+    if (appStateRef.current === AppState.Idle) {
+      console.warn(`[V59] 丢弃 Idle 状态下的 segment_ready (index=${index})，error 已发生或会话已结束`);
+      return;
+    }
+
     const msgId = activeAiMsgIdRef.current;
     if (!msgId) return;
 
@@ -434,6 +453,25 @@ export default function App() {
         appStateRef.current !== AppState.Bridging &&
         appStateRef.current !== AppState.Thinking) return;    // V22: 兼容纯文本回答
 
+    // V64: 撤掉 V63 强制补全 hack. 新策略:
+    // - 视频段播完 + 文字没打完 → 不进真 Idle, 切 idle loop 但 state 保持 Speaking
+    //   (input 仍灰, "AI 还在想" 信号)
+    // - 文字打完 → 再 tryGoIdle 一次, 这时才真进 Idle (input 亮)
+    // 用 messagesRef 同步读, 避免 React state 异步问题
+    const msgs = messagesRef.current;
+    const lastMsg = msgs[msgs.length - 1];
+    const textStillTyping = lastMsg && lastMsg.role === 'assistant' &&
+      (lastMsg.displayedLen ?? 0) < lastMsg.text.length;
+
+    if (textStillTyping) {
+      // V64: 视频已结束, 文本还在打字, 切到 idle loop 让头像不死机
+      // 但保持 state=Speaking (input 仍 disabled), 文字打完后会再 tryGoIdle
+      if (!isWeChatMobile) {
+        avatarRef.current?.playLoop(USE_MP4 ? IDLE_MP4_SRC : IDLE_SRC);
+      }
+      return; // 不清 deferredIdleRef/responseCompleteRef, 让 typing 完后再触发
+    }
+
     deferredIdleRef.current = false;
     responseCompleteRef.current = false;
     setAppState(AppState.Idle);
@@ -441,15 +479,48 @@ export default function App() {
     if (!isWeChatMobile) {
       avatarRef.current?.playLoop(USE_MP4 ? IDLE_MP4_SRC : IDLE_SRC);
     }
+
+    // V64.2: 检测文本是否在非终止符处被截断 (LLM 后端问题: 生成到 "在我" / "多、" 就停)
+    // 终止符: 。.！!？?\n — 不以这些结尾说明 LLM 输出被切
+    // 前端只能警告, 不能补字. 真正的修复在后端 LLM streaming 完整性
+    const finalMsgs = messagesRef.current;
+    const finalAssistant = finalMsgs[finalMsgs.length - 1];
+    if (finalAssistant && finalAssistant.role === 'assistant' && finalAssistant.text) {
+      const t = finalAssistant.text.replace(/\s+$/, ''); // 去除末尾空白 (TS 没有 rstrip)
+      const lastChar = t[t.length - 1];
+      if (!'。.！!？？\n'.includes(lastChar)) {
+        console.warn(
+          `[V64.2] AI 响应文本在非终止符处结束: "...${t.slice(-20)}" (last char: "${lastChar}")`,
+          `\n可能原因: LLM streaming 超时 / token 限制 / 后端 segment 生成中断`,
+          `\n前端无法补全, 需检查后端 streaming_pipeline.py / segment_generator.py`
+        );
+      }
+    }
     setMessages(prev => {
       const msgs = [...prev];
       const last = msgs[msgs.length - 1];
       if (last && last.role === 'assistant') {
+        // V64: 不强制 displayedLen = text.length, 让 typing 自然完成
+        // 只清 isTyping 标记. typing 完时 setMessages(displayedLen=charCount) 自身处理
         msgs[msgs.length - 1] = { ...last, isTyping: false };
       }
       return msgs;
     });
   }, [isWeChatMobile]);
+
+  // V64: 让 useEffect 能调用 tryGoIdle
+  tryGoIdleRef.current = tryGoIdle;
+
+  // V64: 监听 messages, 当最后一条 assistant 消息打字完成时再触发 tryGoIdle
+  // 场景: 视频段先结束 (tryGoIdle 被拦: text 还在打字), 文字自然打完时, 此处补一次触发
+  // tryGoIdle 内部 guards 保证幂等 (进 Idle 后再调用 early return)
+  useEffect(() => {
+    const last = messages[messages.length - 1];
+    if (last && last.role === 'assistant' &&
+        (last.displayedLen ?? 0) >= last.text.length && last.text.length > 0) {
+      tryGoIdleRef.current?.();
+    }
+  }, [messages]);
 
   const handleWsEvent = useCallback((event: ServerEvent) => {
     switch (event.type) {
@@ -470,18 +541,23 @@ export default function App() {
 
       case 'state_change':
         // V22: 从非 Speaking 切到 idle 时也播放 idle 循环（解决纯文本回答后动画不回归的问题）
-        // V56 fix: 加 appStateRef.current !== AppState.Idle 判断，避免重复 playLoop。
-        // 背景：服务端在 _run_streaming_flow 完成后会发 response_complete + all_completed +
-        //       return_to_idle + state_change idle 共 4 个事件，前 3 个经 tryGoIdle() 收敛为
-        //       一次 playLoop(IDLE_SRC)，第 4 个 state_change idle 又会再调一次。
-        //       第二次调时 loopVideo 已是 idle URL（走 showLoop else 分支），showLoop 会立即把
-        //       mainVideo opacity 设为 0（桥接淡出），但 loopVideo 的 play() 是异步的，
-        //       中间几 ms 窗口两层视频都不可见 → 白屏/avatar 消失。
-        if (event.state === 'idle' &&
-            appStateRef.current !== AppState.Speaking &&
-            appStateRef.current !== AppState.Idle) {
-          setAppState(AppState.Idle);
-          avatarRef.current?.playLoop(USE_MP4 ? IDLE_MP4_SRC : IDLE_SRC);
+        // V57 fix: 关键修正 — 条件改为"不是 Idle 即 play"，作为 O() 失败的备份。
+        // V56 错误地同时排除 `!==Speaking` 和 `!==Idle`，把 state_change 备份路径堵死：
+        //   - tryGoIdle (O) 在 segments 还没播完时会被 isVideoPlayingRef 拦住，
+        //     也就是说当 state_change idle 到达时 p.current 仍可能 == Speaking
+        //   - V56 的 `!==Speaking` 把这种情况也吃掉了，备份失效
+        //   - 只能依赖 video-ended 兜底再 O()，但 'ended' 事件在某些环境（音频残留、
+        //     X5 内核、frame 卡住）下不触发 → avatar 永远卡在 Speaking → 白屏
+        // V57 正确条件：`!==Idle`（只防重复 play）。p.current 是 Speaking 时也 play，
+        //   作为 tryGoIdle 失败的兜底。
+        // V64: 状态切换走 tryGoIdle 统一路径, 自动包含文字打字 guard
+        //   (state_change 直接 setState(Idle) 会绕开 V64 的 "text 没打完延迟进 idle" 逻辑)
+        if (event.state === 'idle' && appStateRef.current !== AppState.Idle) {
+          // V64: 走 tryGoIdle, 它会检查文字是否打完; 没打完就保持 state=Speaking
+          // 并切 idle loop (avatar 平静, input 仍 disabled, "AI 还在想" 信号)
+          // 同时设 deferredIdleRef=true 让 tryGoIdle 的 "未收到完成信号" guard 通过
+          deferredIdleRef.current = true;
+          tryGoIdle();
         }
         break;
 
@@ -538,6 +614,11 @@ export default function App() {
       case 'error':
         console.error('服务端错误:', event.message);
         setErrorMessage(event.message);
+        // V60 fix: 中止之前 segment_ready 排队的 play()/showMain()。
+        // 背景：error 之前 segment_ready 已经触发 play()，正在 await resolveVideoSrc。
+        // 如果不中止，await 完成后 showMain 会强制把 main 设回 visible + 显示
+        // segment 帧，覆盖 V58/V59 的 idle 状态。avatar 视觉卡在 segment 帧。
+        avatarRef.current?.abortPlay();
         setAppState(AppState.Idle);
         avatarRef.current?.playLoop(USE_MP4 ? IDLE_MP4_SRC : IDLE_SRC);
         setMessages(prev => {
@@ -591,6 +672,93 @@ export default function App() {
     return () => window.removeEventListener('video-ended', handler);
   }, [tryGoIdle]);
 
+  // ─── V62: stuck detector — 兜底防止 avatar 卡死 (主从两个方向) ───
+  // 真实生产场景下观察到的所有失败模式：
+  //   A. main 卡住: segment 视频在显示，但实际 ended/paused-end，state 没切回 idle
+  //   B. loop 卡住: 已经回到 idle 状态（main 隐藏），但 loop 视频 paused，
+  //      用户看到的是"嘴型闭合"但完全没有呼吸动画 — 视觉上像冻住
+  // 任何一种都会让用户看到"嘴型卡住"。
+  //
+  // V62 修复 (V62g, 主从双向):
+  //   - A 方向: main 显示 + (ended=true 或 pausedAtEnd 持续 2s) → 强制 playLoop(idle)
+  //   - B 方向: main 隐藏 + loop paused 持续 2s → 强制 loop.play()
+  useEffect(() => {
+    const stuckSinceRef = { current: 0 as number | null };
+    const loopPausedSinceRef = { current: 0 as number | null };
+
+    const checkStuck = () => {
+      const mainVideo = avatarRef.current?.getVideoElement?.();
+      if (!mainVideo) {
+        stuckSinceRef.current = null;
+        loopPausedSinceRef.current = null;
+        return;
+      }
+
+      // ─── A 方向: main 卡住 ───
+      const mainVisible = mainVideo.style.opacity !== '0' && mainVideo.style.opacity !== '';
+      const ended = mainVideo.ended;
+      const pausedAtEnd = mainVideo.paused && mainVideo.currentTime > 0 &&
+        mainVideo.duration > 0 &&
+        mainVideo.currentTime >= mainVideo.duration * 0.95;
+      const mainStuck = mainVisible && (ended || pausedAtEnd);
+
+      // ─── B 方向: loop 卡住（main 隐藏，但 loop paused 太久）───
+      // 通过 AvatarView 的 getLoopVideo 间接拿不到（没有暴露），
+      // 改为读所有 video 元素找 loopVideo。
+      const videos = document.querySelectorAll('video');
+      const loopVideo = videos[1] as HTMLVideoElement | undefined;
+      const loopPausedLong = loopVideo &&
+        loopVideo.paused &&
+        loopVideo.currentTime > 0 &&
+        !mainVisible; // loop 在显示状态但 paused
+
+      const now = Date.now();
+
+      // A 方向处理
+      if (mainStuck) {
+        if (stuckSinceRef.current === null) {
+          stuckSinceRef.current = now;
+        } else {
+          const stuckFor = (now - stuckSinceRef.current) / 1000;
+          if (stuckFor >= 2) {
+            console.warn('[V62.A] stuck detector firing: main stuck for', stuckFor.toFixed(1), 's, forcing idle.', {ended, pausedAtEnd, t: mainVideo.currentTime, dur: mainVideo.duration});
+            deferredIdleRef.current = false;
+            responseCompleteRef.current = false;
+            isVideoPlayingRef.current = false;
+            setAppState(AppState.Idle);
+            if (!isWeChatMobile) {
+              avatarRef.current?.playLoop(USE_MP4 ? IDLE_MP4_SRC : IDLE_SRC);
+            }
+            stuckSinceRef.current = null;
+          }
+        }
+      } else {
+        stuckSinceRef.current = null;
+      }
+
+      // B 方向处理
+      if (loopPausedLong) {
+        if (loopPausedSinceRef.current === null) {
+          loopPausedSinceRef.current = now;
+        } else {
+          const pausedFor = (now - loopPausedSinceRef.current) / 1000;
+          if (pausedFor >= 2) {
+            console.warn('[V62.B] loop video paused for', pausedFor.toFixed(1), 's, forcing play()', {src: loopVideo?.src?.split('?')[0]?.split('/').slice(-1)[0], t: loopVideo?.currentTime});
+            if (loopVideo) {
+              loopVideo.play().catch(() => {});
+            }
+            loopPausedSinceRef.current = null;
+          }
+        }
+      } else {
+        loopPausedSinceRef.current = null;
+      }
+    };
+
+    const interval = window.setInterval(checkStuck, 1000);
+    return () => window.clearInterval(interval);
+  }, [isWeChatMobile]);
+
   // ─── 用户交互 ───
 
   /** 发送消息 */
@@ -601,6 +769,13 @@ export default function App() {
     // V18: 预升 msg_seq
     currentMsgSeqRef.current += 1;
     console.log(`[V18] handleSend: 预升 currentMsgSeqRef → ${currentMsgSeqRef.current}`);
+
+    // V61: 新一轮开始前先清除 V60 的 abort 标志。
+    // 背景：上一轮如果 error handler 调了 abortPlay()，playAbortRef=true。
+    // 不在这里 clear 的话，新一轮的第一个 segment 会被 showMain 入口的
+    // abort 检查误判为已中止、不播放，画面就卡在 idle 帧。
+    // handleSend 是"新轮次"的明确边界，clearAbort() 在这里调最安全。
+    avatarRef.current?.clearAbort();
 
     deferredIdleRef.current = false;
     responseCompleteRef.current = false;

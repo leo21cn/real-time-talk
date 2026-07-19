@@ -35,6 +35,10 @@ export interface AvatarViewHandle {
   clearPreloadedBlobs: () => void;
   /** V35: 在用户手势同步调用栈中预捕获播放权限，解锁 X5 自动播放策略 */
   captureGesture: () => void;
+  /** V60: 中止正在进行的 play()/showMain() — error handler 触发时调用，防止已排队的 segment 覆盖 idle 状态 */
+  abortPlay: () => void;
+  /** V60: 清除 abort 标志 — 新一轮 handleSend 时调用，恢复正常播放 */
+  clearAbort: () => void;
 }
 
 interface AvatarViewProps {
@@ -93,6 +97,12 @@ const AvatarView = memo(forwardRef<AvatarViewHandle, AvatarViewProps>(
     const playFailCountRef = useRef<number>(0);
     // V35: 轻触继续覆盖层 DOM 引用
     const tapOverlayRef = useRef<HTMLDivElement | null>(null);
+    // V60 fix: showMain/play abort 标志 — error handler 触发后，
+    //   之前 segment_ready 排队的 play() 在 await resolveVideoSrc 完成后
+    //   会继续跑 showMain，强制把 main 设回 visible + 显示 segment 帧，
+    //   覆盖 V58/V59 的 idle 状态。这里 error handler 调 abort()，
+    //   showMain 和 play() 检查后立即返回，不再覆盖 idle 状态。
+    const playAbortRef = useRef<boolean>(false);
 
     // V4: 预下载缓存 — key 为原始 URL，value 为预创建的 objectURL。
     // segment_ready 后调用 preloadVideo 提前下载下一段视频，
@@ -341,6 +351,11 @@ const AvatarView = memo(forwardRef<AvatarViewHandle, AvatarViewProps>(
     /** 切换到主视频（双 video 交替预加载，消除段间空白帧） */
     // url 为已解析的 objectURL 或原始 HTTP URL；originalUrl 可选，记录来源用于错误兑底
     const showMain = useCallback((url: string, originalUrl?: string) => {
+      // V60 fix: 如果 abort 标志被设置（error handler 触发），跳过 showMain
+      if (playAbortRef.current) {
+        console.warn('[V60] showMain aborted, error handler triggered');
+        return;
+      }
       const mainVideo = mainVideoRef.current;
       const loopVideo = loopVideoRef.current;
       if (!mainVideo || !loopVideo) return;
@@ -615,7 +630,24 @@ const AvatarView = memo(forwardRef<AvatarViewHandle, AvatarViewProps>(
       const loopHasScale = loopVideo.style.transform.includes('scale(0.589)');
       let mainIsBridge = false;
       if (loopHasScale) {
-        if (activeElementRef.current === 'main') {
+        if (isIdle) {
+          // V58 fix: segment→idle 切换时**不再**用 main 当桥接。
+          // 背景：原代码把 main 设成桥接（用 segment 帧挡白），依赖 canplay + 2s
+          //   兜底淡出 main 露出 loop。在某些环境（X5 内核、audio 残留、TTS
+          //   错误快速回退等）下 canplay 不触发，桥接淡出永远不完成 → avatar 卡
+          //   在 segment 帧上，loop 永远 hidden，send 按钮可用但视觉卡死。
+          //   用户报"说一句话后没有切到等待动画"+"长段话说一半卡住"都是这
+          //   个原因。
+          // 修复：直接 hide main，保留 loop 当前帧（analysis 帧）作占位。
+          //   standard path Y(loopVideo, idle) → canplay → ye 把 loop 切到 idle。
+          //   视觉：analysis 帧 → (IDB 缓存命中，load 几乎瞬时) → idle 帧。
+          //   允许 1-2 帧占位闪，但绝不会再卡死。
+          mainVideo.pause();
+          mainVideo.style.transition = 'none';
+          mainVideo.style.opacity = '0';
+          mainVideo.style.pointerEvents = 'none';
+          mainIsBridge = false;
+        } else if (activeElementRef.current === 'main') {
           loopVideo.pause();
           loopVideo.style.transition = 'none';
           loopVideo.style.opacity = '0';
@@ -668,13 +700,12 @@ const AvatarView = memo(forwardRef<AvatarViewHandle, AvatarViewProps>(
           // 不调用 load() 避免清空浏览器已缓存的视频帧。
         }, 150);
       }
-
-      // V51: scale(0.589) 缩小 idle 使普兰匹配 speaking 高度。
-      loopVideo.style.transform = 'scale(0.589)';
-      loopVideo.style.transformOrigin = 'center center';
-      loopVideo.muted = true;
-
       if (isIdle) {
+        // V64.1 fix: 重置 loopVideo transform 从 scale(1) 回到 scale(0.589)
+        // 原因: V48.4 fix 在 showMain(targetEl=loopVideo) 播 segment 时设了 scale(1),
+        //       切回 idle 时如果不重置, loop 视频卡在全尺寸 1.0 上, 卡通形象看起来"变大".
+        loopVideo.style.transform = 'scale(0.589)';
+        loopVideo.style.transformOrigin = 'center center';
         // idle：JS 接管无缝循环
         loopVideo.loop = false;
         idleLoopActiveRef.current = true;
@@ -854,12 +885,20 @@ const AvatarView = memo(forwardRef<AvatarViewHandle, AvatarViewProps>(
           warmupVideoElement: async () => { /* no-op */ },
           clearPreloadedBlobs: () => { /* no-op */ },
           captureGesture: () => { /* no-op: 微信端不需要解锁自动播放 */ },
+          abortPlay: () => { /* no-op: 微信端不播视频 */ },
+          clearAbort: () => { /* no-op */ },
         };
       }
       return ({
       async play(url: string) {
         const loopVideo = loopVideoRef.current;
         if (!loopVideo) return;
+
+        // V60 fix: 注意 — 不在这里 reset playAbortRef！
+        // 原因：本轮 response 期间，video-ended 事件会触发 videoPlaylistRef 队列里
+        // 后续 segment 的 play()（如 segment_1）。如果在 play() 里 reset abort 标志，
+        // 后续 segment 的 showMain 会绕过 abort，覆盖 idle 状态。
+        // abort 标志只在用户发送新一轮消息（handleSend）时由 clearAbort() 显式清掉。
 
         // 切换主视频源时重置 mp4 fallback 状态
         resetMp4Fallback();
@@ -1212,6 +1251,24 @@ const AvatarView = memo(forwardRef<AvatarViewHandle, AvatarViewProps>(
           }
         });
       },
+
+      // V60: 中止正在进行的 play()/showMain() — error handler 在 setState(Idle) 之后
+      // 调 abortPlay()，让之前 segment_ready 排队的 play() 在 await resolveVideoSrc
+      // 完成后立即返回，不再 showMain 覆盖 idle 状态。
+      abortPlay() {
+        playAbortRef.current = true;
+        // 清空 preloaded blobs + pending 队列，防止 abort 后还有 stale 数据
+        preloadedBlobsRef.current.clear();
+        preloadPendingRef.current?.clear();
+      },
+
+      // V60: 清除 abort 标志 — 新一轮 handleSend 时调用，恢复正常播放。
+      // 必须在 abortPlay 调用的同一轮 response 期间，video-ended 触发的后续 segment
+      // 播放（来自 videoPlaylistRef 队列）也能被 abort 拦截 — play() 内部不再 reset
+      // 此标志（避免和 abort 逻辑打架），仅在 handleSend 显式 clear。
+      clearAbort() {
+        playAbortRef.current = false;
+      },
     })}, [isWeChatMobile, showMain, showLoop, resetMp4Fallback, resolveVideoSrc, releaseVideoSrc, assignVideoSrc]);
 
     // 主视频播放完毕回调
@@ -1312,12 +1369,14 @@ const AvatarView = memo(forwardRef<AvatarViewHandle, AvatarViewProps>(
       <div
         style={{
           position: 'relative',
-          // V50: avatar 容器高度恢复至 75vh（与 ChatPanel 等高），普兰可见高度 ≈ 75vh × 58.6% = 44vh（ChatPanel 的 59%），
-          // 视觉上接近 2/3。统一 scale(1) 无需 React.memo 保护动态 transform。
-          height: isWeChatMobile ? '160px' : (isMobile ? '267px' : '75vh'),
+          // V65: 微信移动端 avatar 占屏幕 2/5 (40vh), 留出顶部空间让脑袋完整露出来
+          //   之前 160px 太小, 头像几乎贴顶部边缘. 现在 40vh ≈ 640px (1600px viewport),
+          //   aspectRatio 3/4 算出 width ≈ 480px, head/body/hand 完整可见.
+          //   marginTop 24px 额外留出顶部安全空间, 避免 head 贴边.
+          height: isWeChatMobile ? '40vh' : (isMobile ? '267px' : '75vh'),
           aspectRatio: '3 / 4',
           maxWidth: '540px',
-          maxHeight: '75vh',
+          maxHeight: isWeChatMobile ? '50vh' : '75vh',
           minWidth: '300px',
           flexShrink: 0,
           flexGrow: 0,
@@ -1325,6 +1384,10 @@ const AvatarView = memo(forwardRef<AvatarViewHandle, AvatarViewProps>(
           overflow: 'hidden',
           background: '#FFFFFF',
           alignSelf: isMobile ? 'center' : 'auto',
+          marginTop: isWeChatMobile ? '48px' : '0',
+          // V66: 加上 paddingTop 给头顶留 breathing room (objectFit:contain 模式下
+          //   静态 PNG 头像在图片顶部, 容器无 padding 会让头贴边)
+          paddingTop: isWeChatMobile ? '32px' : '0',
         }}
       >
         {/* V37: 微信移动端 — 静态普兰图，不播放任何动画/语音 */}
@@ -1339,9 +1402,13 @@ const AvatarView = memo(forwardRef<AvatarViewHandle, AvatarViewProps>(
               width: '100%',
               height: '100%',
               objectFit: 'contain',
-              // V38: 缩小 scale，避免裁去头部/手部
-              transform: 'scale(1.1)',
-              transformOrigin: 'center center',
+              // V66: 去掉 scale(1.1), 改用 objectPosition 把头顶放在稍低位置
+              //   - scale(1.1) 让图片溢出 container 5%, 把头顶/手顶裁掉
+              //   - objectPosition 控制 objectFit:contain 模式下图片在容器内的位置
+              //   - 'center 15%' 让图片在垂直方向向上偏移 15% (顶部 15% 留空),
+              //     这样头顶有 ~10% 容器高度的 breathing room, 不会贴边
+              objectPosition: 'center 15%',
+              transform: 'none',
               userSelect: 'none',
               WebkitUserSelect: 'none',
             }}
