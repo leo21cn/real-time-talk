@@ -128,6 +128,44 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# V56: HEAD 转 GET 中间件 — 浏览器对 <video preload="auto"> / 资源预取会发 HEAD
+# 探测元数据（Content-Length / Content-Type）。FastAPI 不会自动给 GET 路由生成
+# HEAD handler，导致 HEAD 全部 404，可能造成视频加载失败。
+# 实现：HEAD 请求内部走 GET 路由，拿到响应后清空 body（HTTP/1.1 规范要求 HEAD 无 body）。
+from starlette.requests import Request as StarletteRequest
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
+from starlette.responses import Response as StarletteResponse
+
+
+@app.middleware("http")
+async def head_to_get_middleware(request: StarletteRequest, call_next):
+    if request.method != "HEAD":
+        return await call_next(request)
+
+    # 把 HEAD 改成 GET，触发 GET 路由处理
+    request.scope["method"] = "GET"
+    response = await call_next(request)
+
+    # HEAD 响应必须没有 body（HTTP/1.1 规范）。如果响应是 StreamingResponse/FileResponse
+    # 之类的可迭代 body，需要清空；普通 Response 通常 body 为空或可直接覆盖。
+    if hasattr(response, "body_iterator") and response.body_iterator is not None:
+        # 构造一个只发送 headers 不带 body 的空响应
+        async def empty_body():
+            if False:
+                yield b""
+
+        response.body_iterator = empty_body()
+    if hasattr(response, "body"):
+        # Starlette Response 的 body 是 bytes/str，正常情况 HEAD 路由返回 JSON 错误时
+        # body 是 JSON 字符串，必须清空否则违反 HTTP 规范
+        if response.body and len(response.body) > 0:
+            # 记录原始 Content-Length 但清空 body
+            original_content_length = response.headers.get("content-length")
+            response.body = b""
+            if original_content_length:
+                response.headers["content-length"] = "0"
+    return response
+
 # 注册 REST API 路由
 app.include_router(session_router)
 app.include_router(clips_router)

@@ -22,3 +22,8 @@ image.tar
 # Node
 node_modules/
 dist/
+
+# 项目根目录的调试截图（请改用 tmp/ 或加 screenshot_/debug_ 前缀）
+/_screenshot_*.png
+/_debug_*.png
+/_*.tmp.png

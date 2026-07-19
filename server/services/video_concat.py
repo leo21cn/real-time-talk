@@ -23,7 +23,12 @@ class VideoConcat:
     def __init__(self):
         cfg = get_config()
         self.clips_dir = Path(cfg["avatar"]["clips_dir"])
-        self.webm_dir = self.clips_dir / ".webm"
+        # V55: 拼接源改用 .mp4/ 目录。背景：.webm/ 目录里的文件实际是 H.264/MP4（H.264 视频
+        # 编码 + MP4 容器），但被命名成 .webm。旧代码用 -c:v copy 流复制到 .webm 容器，FFmpeg
+        # 直接拒绝（WebM 只支持 VP8/VP9/AV1），返回 exit 234，stderr 包含 ffmpeg banner + 报错
+        # 文本被当错误消息推到前端。.mp4/ 目录里的副本是同源的 H.264/AAC MP4 文件，
+        # 用 -c:v copy 流复制到 MP4 容器即可，无需重编码，毫秒级完成。
+        self.mp4_dir = self.clips_dir / ".mp4"
         self.ffmpeg_path = cfg["ffmpeg"]["path"]
         self.gpu_encoder = cfg["ffmpeg"].get("gpu_encoder", "auto")
 
@@ -46,7 +51,7 @@ class VideoConcat:
             segment_index: 段落序号
 
         Returns:
-            输出视频文件路径 (.webm)
+            输出视频文件路径 (.mp4)
         """
         work_dir = Path(f"_work/{session_id}")
         work_dir.mkdir(parents=True, exist_ok=True)
@@ -73,7 +78,8 @@ class VideoConcat:
             logger.warning(f"V53: 读 concat_list 失败: {e}")
 
         # 3. FFmpeg concat demuxer + 混音
-        output_path = str(work_dir / f"output_{segment_index}.webm")
+        # V55: 输出改为 .mp4（源已是 H.264/AAC MP4，-c:v copy 流复制 + -c:a aac 即可）
+        output_path = str(work_dir / f"output_{segment_index}.mp4")
 
         await self._run_ffmpeg_concat(str(concat_list_path), audio_path, output_path)
 
@@ -101,7 +107,8 @@ class VideoConcat:
         seen = set()  # V48.5: 去重 set，避免同一 clip 多次出现造成视觉重复
         clips = []
         for label in labels:
-            clip_path = self.webm_dir / f"{label}.webm"
+            # V55: 源改用 .mp4/ 目录（实际是 H.264/AAC MP4 文件）
+            clip_path = self.mp4_dir / f"{label}.mp4"
             if clip_path.exists():
                 resolved = clip_path.resolve()
                 # V48.5: 只保留首次出现的 clip（去重避免相邻重复）
@@ -120,7 +127,7 @@ class VideoConcat:
         if len(clips) == 1:
             # 选择一个与现有 clip 不同的补充 clip（优先选：transition -> introduction）
             for fallback_label in ("transition", "introduction", "emphasis", "listing"):
-                fallback_path = self.webm_dir / f"{fallback_label}.webm"
+                fallback_path = self.mp4_dir / f"{fallback_label}.mp4"
                 if fallback_path.exists() and fallback_path.resolve() != clips[0].resolve():
                     clips.append(fallback_path)
                     logger.info(f"单 clip 补充 {fallback_label} 避免重复: {clips[0].name} + {fallback_path.name}")
@@ -165,14 +172,14 @@ class VideoConcat:
             existing_resolved = set(cf.resolve() for cf in clip_files)
             existing_stems = set(cf.stem for cf in clip_files)
             unique_fill_clips: List[Path] = []
-            # V49: 动态扫描 .webm 目录下所有可用 clip，替代硬编码候选列表
-            for webm_file in sorted(self.webm_dir.glob("*.webm")):
-                stem = webm_file.stem
+            # V49: 动态扫描 .mp4 目录下所有可用 clip，替代硬编码候选列表
+            for mp4_file in sorted(self.mp4_dir.glob("*.mp4")):
+                stem = mp4_file.stem
                 if stem in existing_stems:
                     continue  # 已在原始 labels 中，跳过
-                resolved = webm_file.resolve()
+                resolved = mp4_file.resolve()
                 if resolved not in existing_resolved:
-                    unique_fill_clips.append(webm_file)
+                    unique_fill_clips.append(mp4_file)
             # V49: 如果所有 .webm clip 都在原 labels 中，回退到逆序 clip_files
             # 逆序排列确保填充 clip 与开头视觉差异最大化（而非轮询导致与开头一致）
             if not unique_fill_clips:
@@ -195,18 +202,10 @@ class VideoConcat:
 
     async def _run_ffmpeg_concat(self, concat_list_path: str, audio_path: str, output_path: str):
         """
-        运行 FFmpeg concat 命令 — V46 同时输出 webm + mp4。
-
-        - webm: 保留 -c:v copy 快路径，VP9 流原样复制（适合 VP9 硬解良好的平台 / 微信浏览器）
-        - mp4: 重编码为 H.264 (libx264 ultrafast) — 所有现代 PC 浏览器都有 H.264 硬件解码器。
-               避免 PC Chrome / Edge 在 VP9 软解上消耗 30-50% CPU 导致讲话时主线程繁忙、
-               视频帧率压到 5-10 fps、用户感知为“动画像截图” (V45 后仍出现)。
-
-        两份输出并存，客户端按 prefersMp4 选 mp4 (PC/微信) 或 webm (ChromeOS)。
+        V55: 拼接输出 .mp4，源已是 H.264/AAC MP4 文件，-c:v copy 流复制 + -c:a aac 即可，
+        整段耗时 < 1s。不再输出 webm（之前 webm copy 失败是因为 .webm/ 目录里的文件
+        本身是 H.264 MP4 而不是真正的 WebM，FFmpeg 拒绝塞进 WebM 容器）。
         """
-        # webm 输出 — 保持原性能 (VP9 copy)
-        # V49.1: 添加 -map 显式流映射，确保只使用 concat 输入的视频流 + TTS 输入的音频流，
-        # 防止 clip 文件中的音频轨（如有）混入输出导致语音重复。
         await self._exec_ffmpeg(
             [
                 self.ffmpeg_path,
@@ -214,50 +213,18 @@ class VideoConcat:
                 "-safe", "0",
                 "-i", concat_list_path,
                 "-i", audio_path,
-                "-map", "0:v:0",          # 只取 concat 输入的视频流
-                "-map", "1:a:0",          # 只取 TTS 输入的音频流
-                "-c:v", "copy",          # VP9 视频流原样复制（无重编码）
-                "-c:a", "libopus",       # 音频编码为 Opus
-                "-shortest",             # 以较短的流为准
+                "-map", "0:v:0",              # 只取 concat 输入的视频流
+                "-map", "1:a:0",              # 只取 TTS 输入的音频流
+                "-c:v", "copy",               # H.264 视频流原样复制（无重编码）
+                "-c:a", "aac",                # 音频转 AAC（与 MP4 容器匹配）
+                "-b:a", "128k",
+                "-shortest",                  # 以较短的流为准
+                "-movflags", "+faststart",    # MP4 流式首帧快速
                 "-y",
                 output_path,
             ],
-            timeout=120,
+            timeout=60,
         )
-
-        # mp4 输出 — 重编码为 H.264（所有 PC 浏览器硬解）— V46
-        # 使用 ultrafast + crf 28 + 缩小到 540×720 控制重编码耗时在 1-2 秒内
-        # V47: mp4 生成失败不阻断 webm — 客户端 routes_media.py 会 fallback 到 webm
-        # V48 P2: 分辨率从 720:960 降至 540:720（更小的解码开销 = 更低的帧率波动）；
-        #         超时从 120s 缩短到 30s（mp4 是可选项，不应长时间阻塞主流程）
-        mp4_path = output_path.replace(".webm", ".mp4")
-        try:
-            await self._exec_ffmpeg(
-                [
-                    self.ffmpeg_path,
-                    "-f", "concat",
-                    "-safe", "0",
-                    "-i", concat_list_path,
-                    "-i", audio_path,
-                    "-map", "0:v:0",              # 只取 concat 输入的视频流
-                    "-map", "1:a:0",              # 只取 TTS 输入的音频流
-                    "-vf", "scale=540:720",          # V48 P2: 降至 540×720（硬解 ~1-2% CPU）
-                    "-c:v", "libx264",
-                    "-preset", "ultrafast",          # 速度优先（避免被视频卡顿影响）
-                    "-crf", "28",                    # 平衡质量与体积
-                    "-pix_fmt", "yuv420p",           # 兼容性
-                    "-c:a", "aac",
-                    "-b:a", "128k",
-                    "-shortest",
-                    "-movflags", "+faststart",       # MP4 流式首帧快速
-                    "-y",
-                    mp4_path,
-                ],
-                timeout=120,  # V48 P2: 保持 120s（ARM64 QEMU 下编码较慢，30s 会导致频繁超时丢失 mp4）
-            )
-            logger.info(f"mp4 生成成功: {mp4_path}")
-        except Exception as mp4_err:
-            logger.warning(f"mp4 生成失败（不影响 webm）: {mp4_err}")
 
     async def _exec_ffmpeg(self, cmd: list, timeout: int = 120):
         """执行 FFmpeg 命令并处理超时/异常 — V46 抽出复用"""

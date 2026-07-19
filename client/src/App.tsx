@@ -316,13 +316,14 @@ export default function App() {
   }, [isMobile, needsUserTap, prefetchClipsOnUnlock]);
 
   // V5: 主动预加载段 N+1（如果存在）。拼 URL，不依赖服务端 push。
+  // V55: 服务端只输出 .mp4，预加载也改为 .mp4。
   const tryPreloadNext = useCallback((currentIndex: number, total: number | null) => {
     if (total === null) return;
     const nextIndex = currentIndex + 1;
     if (nextIndex >= total) return;
     const token = sessionTokenRef.current;
     if (!token) return;
-    const nextUrl = `/api/media/${token}/segment_${nextIndex}.webm`;
+    const nextUrl = `/api/media/${token}/segment_${nextIndex}.mp4`;
     avatarRef.current?.preloadVideo(nextUrl);
   }, []);
 
@@ -469,7 +470,16 @@ export default function App() {
 
       case 'state_change':
         // V22: 从非 Speaking 切到 idle 时也播放 idle 循环（解决纯文本回答后动画不回归的问题）
-        if (event.state === 'idle' && appStateRef.current !== AppState.Speaking) {
+        // V56 fix: 加 appStateRef.current !== AppState.Idle 判断，避免重复 playLoop。
+        // 背景：服务端在 _run_streaming_flow 完成后会发 response_complete + all_completed +
+        //       return_to_idle + state_change idle 共 4 个事件，前 3 个经 tryGoIdle() 收敛为
+        //       一次 playLoop(IDLE_SRC)，第 4 个 state_change idle 又会再调一次。
+        //       第二次调时 loopVideo 已是 idle URL（走 showLoop else 分支），showLoop 会立即把
+        //       mainVideo opacity 设为 0（桥接淡出），但 loopVideo 的 play() 是异步的，
+        //       中间几 ms 窗口两层视频都不可见 → 白屏/avatar 消失。
+        if (event.state === 'idle' &&
+            appStateRef.current !== AppState.Speaking &&
+            appStateRef.current !== AppState.Idle) {
           setAppState(AppState.Idle);
           avatarRef.current?.playLoop(USE_MP4 ? IDLE_MP4_SRC : IDLE_SRC);
         }

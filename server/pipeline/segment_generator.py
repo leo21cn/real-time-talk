@@ -86,33 +86,19 @@ class SegmentGenerator:
             )
             logger.info(f"[段{segment_index}] 视频拼接完成: {video_path}")
 
-            # Step 4: 上传到 MinIO（V46: 同时上传 webm + mp4）
-            # 客户端 prefersMp4() 默认返回 true，选择 mp4 路径避免 PC 浏览器 VP9 软解卡顿。
-            webm_key = f"sessions/{session_id}/segment_{segment_index}.webm"
+            # Step 4: 上传到 MinIO（V55: 只输出 .mp4）
+            # V55: video_concat 直接输出 H.264/AAC MP4，不再有 webm。
+            # 保留 video_path_webm 字段以兼容旧的 SegmentResult dataclass，但不再使用。
             mp4_key = f"sessions/{session_id}/segment_{segment_index}.mp4"
-            mp4_path = video_path.replace(".webm", ".mp4")
             try:
-                await self.minio.upload(video_path, webm_key)
-                logger.info(f"[段{segment_index}] MinIO 上传成功 webm: {webm_key}")
-                # 上传 mp4（H.264 版本）— 如果本地存在
-                mp4_uploaded = False
-                try:
-                    import os
-                    if os.path.exists(mp4_path):
-                        await self.minio.upload(mp4_path, mp4_key)
-                        logger.info(f"[段{segment_index}] MinIO 上传成功 mp4: {mp4_key}")
-                        mp4_uploaded = True
-                    else:
-                        logger.warning(f"[段{segment_index}] mp4 未生成: {mp4_path}")
-                except Exception as mp4_err:
-                    # mp4 上传失败不影响 webm — 客户端会退到 webm
-                    logger.warning(f"[段{segment_index}] mp4 上传失败（退到 webm）: {mp4_err}")
+                await self.minio.upload(video_path, mp4_key)
+                logger.info(f"[段{segment_index}] MinIO 上传成功 mp4: {mp4_key}")
                 return SegmentResult(
                     index=segment_index,
                     text=text,
-                    video_path=mp4_key if mp4_uploaded else webm_key,
-                    video_path_webm=webm_key,
-                    video_path_mp4=mp4_key if mp4_uploaded else None,
+                    video_path=mp4_key,
+                    video_path_webm="",  # V55: 不再输出 webm
+                    video_path_mp4=mp4_key,
                     duration_ms=duration_ms,
                     labels=labels,
                 )
@@ -121,9 +107,9 @@ class SegmentGenerator:
                 return SegmentResult(
                     index=segment_index,
                     text=text,
-                    video_path=mp4_path if os.path.exists(mp4_path) else video_path,
-                    video_path_webm=video_path,
-                    video_path_mp4=mp4_path if os.path.exists(mp4_path) else None,
+                    video_path=video_path,
+                    video_path_webm="",  # V55: 不再输出 webm
+                    video_path_mp4=video_path,
                     duration_ms=duration_ms,
                     labels=labels,
                 )

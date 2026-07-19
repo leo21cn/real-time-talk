@@ -152,25 +152,23 @@ class StreamingPipeline:
         （useTypingAnimation 按 duration_ms * 60% 推进 displayedLen），
         消除 WebSocket 串行推送造成的卡通形象与文字不同步。
 
-        V46: 同时推送 webm 和 mp4 两个 URL，客户端按 prefersMp4() 选优。
-        - video_url: 首选（mp4 优先，没有则 webm）
-        - video_url_webm / video_url_mp4: 显式供客户端 fallback
+        V55: 只推 mp4 url（V46 设计的 webm fallback 已经不必要 — 根因是
+        .webm/ 目录里实际是 H.264 MP4 文件流复制失败；V55 改为直接输出
+        H.264/AAC MP4 视频，无需 fallback）。保留 video_url_webm 字段
+        （设为空串）以兼容旧前端解析。
         """
         try:
             # 使用 API 代理路径（避免 MinIO presigned URL 在浏览器不可达）
             # V18: 添加 seq 参数区分不同轮对话，避免浏览器/IndexedDB 缓存碰撞
-            video_url_webm = f"/api/media/{self.session_id}/segment_{index}.webm?seq={self.msg_seq}"
-            video_url_mp4 = f"/api/media/{self.session_id}/segment_{index}.mp4?seq={self.msg_seq}"
-            # 优先 mp4（PC 浏览器 H.264 硬解，避免 VP9 软解卡顿）
-            video_url = video_url_mp4 if result.video_path_mp4 else video_url_webm
+            video_url = f"/api/media/{self.session_id}/segment_{index}.mp4?seq={self.msg_seq}"
 
             # 一次性推送 segment_ready（含完整 text + duration_ms）
             await self._push_event({
                 "type": "segment_ready",
                 "index": index,
                 "video_url": video_url,
-                "video_url_webm": video_url_webm,
-                "video_url_mp4": video_url_mp4,
+                "video_url_webm": "",  # V55: 不再输出 webm
+                "video_url_mp4": video_url,
                 "duration_ms": result.duration_ms,
                 "text": result.text,
             })

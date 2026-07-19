@@ -824,14 +824,13 @@ const AvatarView = memo(forwardRef<AvatarViewHandle, AvatarViewProps>(
         // V52 修复: 不要设置 currentTime=0。首次交互时 captureGesture 刚启动 loopVideo，
         // seek 到 0 会导致解码重置 → 视觉卡顿；后续交互 video 已在播，seek 到 0 也会跳帧。
         // src 没变，保持当前播放位置即可。
-        // 隐藏桥接的 mainVideo
-        if (mainIsBridge) {
-          clearMainSrcClearTimer();
-          mainVideo.pause();
-          mainVideo.style.transition = 'none';
-          mainVideo.style.opacity = '0';
-          mainVideo.style.pointerEvents = 'none';
-        }
+        // V56 fix: 不再立即淡出 mainVideo。
+        // 背景：此分支被重复 playLoop 同 URL 调用触发（如 App.tsx state_change idle 与
+        //       tryGoIdle 之间的二次回调）。src 没变说明 loopVideo 已经在播，重复调
+        //       是冗余；立即 opacity=0 桥接淡出会导致短暂"两层都不可见"窗口 → avatar 闪烁/消失。
+        //       修复：保留 mainVideo 可见，作为视觉后备（idle loop 播放时用户视觉上看不到
+        //       桥接视频，因为 loopVideo 在上层）。当下一次真实段视频到来时（src 改变走 if 分支）
+        //       才需要正确的桥接淡出。
         loopVideo.play().catch(() => {});
       }
 
