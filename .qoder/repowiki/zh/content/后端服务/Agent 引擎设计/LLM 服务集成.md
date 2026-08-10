@@ -16,13 +16,6 @@
 - [config.json](file://config.json)
 </cite>
 
-## 更新摘要
-**变更内容**   
-- 更新了LLM响应长度优化配置：max_tokens默认值从2048降至1200
-- 增强了系统提示词的字数限制指令，确保回复控制在1000字以内
-- 完善了中文token与字符数的对应关系说明
-- 更新了配置优先级和使用建议
-
 ## 目录
 1. [简介](#简介)
 2. [项目结构](#项目结构)
@@ -37,8 +30,6 @@
 
 ## 简介
 本技术文档围绕 RealTimeTalk 的 LLM 服务集成，系统性阐述大语言模型的调用封装、响应处理机制（含异步请求、流式响应、错误重试）、提示词工程最佳实践、Markdown 文本清理算法实现原理、客户端配置与连接池管理、超时与限流控制、降级策略，以及稳定性与成本调优建议。文档兼顾初学者友好与资深开发者所需的技术深度，并提供可落地的集成示例路径。
-
-**最新更新**：针对响应长度优化，已将 `llm.max_tokens` 默认值从 2048 降低至 1200（中文约 1 token ≈ 1-1.5 字），配合系统提示词中的严格字数限制指令，确保每轮回复控制在约 1000 字以内，在保证内容完整性的同时提升用户体验和成本控制效果。
 
 ## 项目结构
 RealTimeTalk 后端采用分层与服务化组织方式：
@@ -93,9 +84,9 @@ PROMPT --> CFG
 - [server/pipeline/segment_generator.py:1-138](file://server/pipeline/segment_generator.py#L1-L138)
 - [server/services/llm_client.py:1-204](file://server/services/llm_client.py#L1-L204)
 - [server/services/semantic_analyzer.py:1-126](file://server/services/semantic_analyzer.py#L1-L126)
-- [server/config.py:1-287](file://server/config.py#L1-L287)
-- [config.json:1-47](file://config.json#L1-L47)
-- [server/resources/default_system_prompt.txt:1-33](file://server/resources/default_system_prompt.txt#L1-L33)
+- [server/config.py:1-260](file://server/config.py#L1-L260)
+- [config.json:1-39](file://config.json#L1-L39)
+- [server/resources/default_system_prompt.txt:1-29](file://server/resources/default_system_prompt.txt#L1-L29)
 
 章节来源
 - [server/api/ws_handler.py:1-120](file://server/api/ws_handler.py#L1-L120)
@@ -105,9 +96,9 @@ PROMPT --> CFG
 - [server/pipeline/segment_generator.py:1-138](file://server/pipeline/segment_generator.py#L1-L138)
 - [server/services/llm_client.py:1-204](file://server/services/llm_client.py#L1-L204)
 - [server/services/semantic_analyzer.py:1-126](file://server/services/semantic_analyzer.py#L1-L126)
-- [server/config.py:1-287](file://server/config.py#L1-L287)
-- [config.json:1-47](file://config.json#L1-L47)
-- [server/resources/default_system_prompt.txt:1-33](file://server/resources/default_system_prompt.txt#L1-L33)
+- [server/config.py:1-260](file://server/config.py#L1-L260)
+- [config.json:1-39](file://config.json#L1-L39)
+- [server/resources/default_system_prompt.txt:1-29](file://server/resources/default_system_prompt.txt#L1-L29)
 
 ## 核心组件
 - LlmClient：OpenAI 兼容 Chat Completions 客户端，支持同步 chat 与流式 chat_stream，内置重试、限流等待、超时与连接错误处理。
@@ -118,20 +109,18 @@ PROMPT --> CFG
 - SegmentGenerator：单段生成管线（TTS → 语义分析 → FFmpeg 拼接 → MinIO 上传），失败回退本地。
 - SemanticAnalyzer：通过 LLM 或关键词回退进行语义标签分析，用于视频片段选择。
 - WsHandler：WebSocket 消息路由，协调会话恢复、流式处理流程、ack 确认与取消。
-- Config：统一从 config.json 与 .env 环境变量加载配置，提供全局配置访问。
-
-**更新**：响应长度优化配置已调整，max_tokens 默认值从 2048 降至 1200，配合系统提示词的严格字数限制，确保回复质量与用户体验。
+- Config：统一从 config.json 与 .env 环境变量加载配置，提供 get_config() 全局访问。
 
 章节来源
 - [server/services/llm_client.py:1-204](file://server/services/llm_client.py#L1-L204)
 - [server/agent/conversation_manager.py:1-139](file://server/agent/conversation_manager.py#L1-L139)
-- [server/agent/agent_engine.py:1-178](file://server/agent/agent_engine.py#L1-L178)
+- [server/agent/agent_engine.py:1-181](file://server/agent/agent_engine.py#L1-L181)
 - [server/pipeline/streaming_pipeline.py:1-214](file://server/pipeline/streaming_pipeline.py#L1-L214)
 - [server/pipeline/segment_splitter.py:1-95](file://server/pipeline/segment_splitter.py#L1-L95)
 - [server/pipeline/segment_generator.py:1-138](file://server/pipeline/segment_generator.py#L1-L138)
 - [server/services/semantic_analyzer.py:1-126](file://server/services/semantic_analyzer.py#L1-L126)
-- [server/api/ws_handler.py:1-451](file://server/api/ws_handler.py#L1-L451)
-- [server/config.py:1-287](file://server/config.py#L1-L287)
+- [server/api/ws_handler.py:1-444](file://server/api/ws_handler.py#L1-L444)
+- [server/config.py:1-260](file://server/config.py#L1-L260)
 
 ## 架构总览
 下图展示一次用户消息的端到端流程：WS 接入 → 会话恢复 → 构建 messages（含 system prompt、RAG 上下文、历史）→ 流式 LLM → 边收边切段 → 并行生成视频 → 首段立即推送 → 后续段按 ack 推进 → 完成回到 idle。
@@ -194,15 +183,13 @@ SP-->>Client : "all_completed + return_to_idle + state_change(idle)"
   - 新增模型参数（temperature、top_p、presence_penalty 等）可在 payload 中追加。
   - 自定义错误码映射与重试间隔。
 
-**更新**：max_tokens 参数现已采用更保守的默认值 1200，配合系统提示词的字数限制指令，有效防止过长回复。
-
 ```mermaid
 classDiagram
 class LlmClient {
 +endpoint : str
 +api_key : str
 +model : str
-+max_tokens : int = 1200
++max_tokens : int
 +timeout : Timeout
 +chat(messages, max_tokens) str
 +chat_stream(messages, max_tokens) AsyncGenerator[str]
@@ -216,41 +203,6 @@ class LlmClient {
 
 章节来源
 - [server/services/llm_client.py:23-204](file://server/services/llm_client.py#L23-L204)
-
-### 配置管理与响应长度优化
-- 配置加载优先级：环境变量 > config.json > 默认值
-- **响应长度优化配置**：
-  - `LlmConfig.max_tokens` 默认值：**1200**（原为 2048）
-  - `AppConfig.llm_max_tokens` 默认值：**1200**（原为 2048）
-  - 中文 Token 估算：约 1 token ≈ 1-1.5 个中文字符
-  - 目标回复长度：约 1000 字以内
-- 系统提示词强化：添加严格的字数限制指令，确保内容完整性不截断
-
-**更新**：响应长度优化配置已全面调整，通过双重保障（配置限制 + 提示词约束）确保回复质量。
-
-```mermaid
-flowchart TD
-A["配置加载"] --> B{"环境变量设置?"}
-B --> |是| C["使用环境变量值"]
-B --> |否| D{"config.json 设置?"}
-D --> |是| E["使用 JSON 配置值"]
-D --> |否| F["使用默认值 1200"]
-F --> G["系统提示词字数限制"]
-E --> G
-C --> G
-G --> H["最终 max_tokens 生效"]
-```
-
-图表来源
-- [server/config.py:16-21](file://server/config.py#L16-L21)
-- [server/config.py:94-97](file://server/config.py#L94-L97)
-- [server/resources/default_system_prompt.txt:30-33](file://server/resources/default_system_prompt.txt#L30-L33)
-
-章节来源
-- [server/config.py:16-21](file://server/config.py#L16-L21)
-- [server/config.py:94-97](file://server/config.py#L94-L97)
-- [server/config.py:207-213](file://server/config.py#L207-L213)
-- [server/resources/default_system_prompt.txt:30-33](file://server/resources/default_system_prompt.txt#L30-L33)
 
 ### 对话管理与上下文组装（ConversationManager）
 - 功能要点
@@ -308,10 +260,10 @@ NL1 --> E(["输出纯文本"])
 ```
 
 图表来源
-- [server/agent/agent_engine.py:32-58](file://server/agent/agent_engine.py#L32-L58)
+- [server/agent/agent_engine.py:30-56](file://server/agent/agent_engine.py#L30-L56)
 
 章节来源
-- [server/agent/agent_engine.py:1-178](file://server/agent/agent_engine.py#L1-L178)
+- [server/agent/agent_engine.py:1-181](file://server/agent/agent_engine.py#L1-L181)
 
 ### 流式分段与推送（StreamingPipeline）
 - 功能要点
@@ -408,7 +360,7 @@ FALLBACK --> RET
   - 直接走流式 LLM 与 pipeline，不经过 AgentEngine.process_message（后者用于非流式场景）。
 
 章节来源
-- [server/api/ws_handler.py:1-451](file://server/api/ws_handler.py#L1-L451)
+- [server/api/ws_handler.py:1-444](file://server/api/ws_handler.py#L1-L444)
 
 ### 语义分析（SemanticAnalyzer）
 - 功能
@@ -422,20 +374,14 @@ FALLBACK --> RET
 - [server/services/semantic_analyzer.py:1-126](file://server/services/semantic_analyzer.py#L1-L126)
 
 ### 配置与系统提示词
-- 配置加载优先级：环境变量 > config.json > 默认值
-- **响应长度优化配置**：
-  - LLM 配置项：endpoint、api_key、model、max_tokens（默认 1200）
-  - 系统提示词：从 default_system_prompt.txt 加载，强制纯文本输出规范
-  - 字数限制：严格控制在 1000 字以内，确保内容完整不截断
-
-**更新**：系统提示词已增强字数限制指令，配合 max_tokens 配置的双重保障机制。
+- 配置加载优先级：环境变量 > config.json > 默认值。
+- LLM 配置项：endpoint、api_key、model、max_tokens。
+- 系统提示词：从 default_system_prompt.txt 加载，强制纯文本输出规范。
 
 章节来源
-- [server/config.py:16-21](file://server/config.py#L16-L21)
-- [server/config.py:94-97](file://server/config.py#L94-L97)
-- [server/config.py:207-213](file://server/config.py#L207-L213)
-- [config.json:1-47](file://config.json#L1-L47)
-- [server/resources/default_system_prompt.txt:1-33](file://server/resources/default_system_prompt.txt#L1-L33)
+- [server/config.py:1-260](file://server/config.py#L1-L260)
+- [config.json:1-39](file://config.json#L1-L39)
+- [server/resources/default_system_prompt.txt:1-29](file://server/resources/default_system_prompt.txt#L1-L29)
 
 ## 依赖关系分析
 - 模块耦合
@@ -470,7 +416,7 @@ SG --> CFG
 - [server/pipeline/streaming_pipeline.py:1-120](file://server/pipeline/streaming_pipeline.py#L1-L120)
 - [server/pipeline/segment_generator.py:1-138](file://server/pipeline/segment_generator.py#L1-L138)
 - [server/services/llm_client.py:1-204](file://server/services/llm_client.py#L1-L204)
-- [server/config.py:1-287](file://server/config.py#L1-L287)
+- [server/config.py:1-260](file://server/config.py#L1-L260)
 
 章节来源
 - [server/api/ws_handler.py:1-120](file://server/api/ws_handler.py#L1-L120)
@@ -478,7 +424,7 @@ SG --> CFG
 - [server/pipeline/streaming_pipeline.py:1-120](file://server/pipeline/streaming_pipeline.py#L1-L120)
 - [server/pipeline/segment_generator.py:1-138](file://server/pipeline/segment_generator.py#L1-L138)
 - [server/services/llm_client.py:1-204](file://server/services/llm_client.py#L1-L204)
-- [server/config.py:1-287](file://server/config.py#L1-L287)
+- [server/config.py:1-260](file://server/config.py#L1-L260)
 
 ## 性能与稳定性优化
 - 连接池与复用
@@ -497,18 +443,13 @@ SG --> CFG
   - MinIO 上传失败回退本地路径。
   - 语义分析失败回退关键词匹配。
   - RAG 不可用时降级为纯 LLM 回复。
-- **响应长度优化**
-  - **max_tokens 默认值从 2048 降至 1200**，配合系统提示词的严格字数限制
-  - 中文 Token 估算：约 1 token ≈ 1-1.5 个中文字符
-  - 目标回复长度：约 1000 字以内，保证内容完整性
-  - 双重保障机制：配置限制 + 提示词约束，确保回复质量
 - 成本调优
   - 合理设置 max_tokens，避免过长回复。
   - 使用较小模型（如 qwen-turbo）满足日常问答。
   - 首段语义分析使用关键词回退，减少 LLM 调用次数。
   - 对话摘要阈值与保留条数可调，平衡上下文长度与成本。
 
-**更新**：响应长度优化已成为性能优化的重要组成部分，通过合理的 max_tokens 设置和系统提示词约束，有效提升用户体验并控制成本。
+[本节为通用指导，无需具体文件来源]
 
 ## 故障排查指南
 - LLM 调用失败
@@ -524,25 +465,17 @@ SG --> CFG
 - 会话状态异常
   - 检查 Redis 中 session 是否存在与状态是否一致。
   - 确认 ws_handler 的状态切换逻辑与事件推送顺序。
-- **响应长度问题**
-  - 检查 max_tokens 配置值是否符合预期（默认 1200）。
-  - 验证系统提示词中的字数限制指令是否生效。
-  - 确认中文 Token 估算与实际字符数的对应关系。
-
-**更新**：新增了响应长度问题的故障排查指导。
 
 章节来源
 - [server/services/llm_client.py:62-113](file://server/services/llm_client.py#L62-L113)
 - [server/services/llm_client.py:139-190](file://server/services/llm_client.py#L139-L190)
-- [server/api/ws_handler.py:335-451](file://server/api/ws_handler.py#L335-L451)
+- [server/api/ws_handler.py:335-444](file://server/api/ws_handler.py#L335-L444)
 - [server/pipeline/segment_generator.py:108-138](file://server/pipeline/segment_generator.py#L108-L138)
-- [server/config.py:16-21](file://server/config.py#L16-L21)
-- [server/resources/default_system_prompt.txt:30-33](file://server/resources/default_system_prompt.txt#L30-L33)
 
 ## 结论
-RealTimeTalk 的 LLM 服务集成通过清晰的模块化设计与完善的错误处理机制，实现了高可用、低延迟的实时对话体验。结合流式响应、首段优先推送、语义分析回退与 RAG 降级策略，系统在稳定性与成本之间取得良好平衡。**最新的响应长度优化措施**通过降低 max_tokens 默认值和强化系统提示词约束，进一步提升了用户体验和成本控制效果。建议在连接池复用、重试策略精细化、并发控制与监控告警方面持续优化，进一步提升用户体验与运维效率。
+RealTimeTalk 的 LLM 服务集成通过清晰的模块化设计与完善的错误处理机制，实现了高可用、低延迟的实时对话体验。结合流式响应、首段优先推送、语义分析回退与 RAG 降级策略，系统在稳定性与成本之间取得良好平衡。建议在连接池复用、重试策略精细化、并发控制与监控告警方面持续优化，进一步提升用户体验与运维效率。
 
-**更新**：响应长度优化已成为系统稳定性和用户体验的重要组成部分，通过配置与提示词的双重保障机制，确保回复质量的同时有效控制成本。
+[本节为总结性内容，无需具体文件来源]
 
 ## 附录：配置与示例
 
@@ -551,18 +484,15 @@ RealTimeTalk 的 LLM 服务集成通过清晰的模块化设计与完善的错�
   - endpoint：OpenAI 兼容接口地址
   - api_key：鉴权密钥
   - model：模型名称
-  - **max_tokens：最大生成长度（默认 1200，原为 2048）**
+  - max_tokens：最大生成长度
 - TTS
   - api_key、voice、speed
 - 其他
   - redis、minio、ffmpeg、qdrant、embedding、rag 等
 
-**更新**：max_tokens 默认值已从 2048 调整为 1200，更适合中文对话场景。
-
 章节来源
-- [server/config.py:16-21](file://server/config.py#L16-L21)
-- [server/config.py:94-97](file://server/config.py#L94-L97)
-- [config.json:1-47](file://config.json#L1-L47)
+- [server/config.py:16-123](file://server/config.py#L16-L123)
+- [config.json:1-39](file://config.json#L1-L39)
 
 ### 集成新 LLM 服务的步骤
 - 适配 OpenAI 兼容 API
@@ -581,7 +511,6 @@ RealTimeTalk 的 LLM 服务集成通过清晰的模块化设计与完善的错�
 - 系统提示词设计
   - 明确角色、语气、回答风格与知识边界。
   - 强调纯文本输出要求，禁止 Markdown 语法。
-  - **添加严格的字数限制指令，确保回复质量**。
 - 上下文组装
   - 将 RAG 上下文插入 system 消息，置于历史之前。
   - 使用摘要压缩早期对话，控制 tokens 增长。
@@ -589,12 +518,10 @@ RealTimeTalk 的 LLM 服务集成通过清晰的模块化设计与完善的错�
   - 通过 strip_markdown 确保最终输出为纯文本。
   - 在业务侧二次清洗（如去除多余空白、标准化标点）。
 
-**更新**：系统提示词已强化字数限制要求，配合 max_tokens 配置实现双重保障。
-
 章节来源
-- [server/resources/default_system_prompt.txt:1-33](file://server/resources/default_system_prompt.txt#L1-L33)
+- [server/resources/default_system_prompt.txt:1-29](file://server/resources/default_system_prompt.txt#L1-L29)
 - [server/agent/conversation_manager.py:46-95](file://server/agent/conversation_manager.py#L46-L95)
-- [server/agent/agent_engine.py:32-58](file://server/agent/agent_engine.py#L32-L58)
+- [server/agent/agent_engine.py:30-56](file://server/agent/agent_engine.py#L30-L56)
 
 ### 超时、限流与降级
 - 超时
@@ -610,24 +537,3 @@ RealTimeTalk 的 LLM 服务集成通过清晰的模块化设计与完善的错�
 - [server/services/llm_client.py:80-113](file://server/services/llm_client.py#L80-L113)
 - [server/services/semantic_analyzer.py:81-86](file://server/services/semantic_analyzer.py#L81-L86)
 - [server/pipeline/segment_generator.py:98-106](file://server/pipeline/segment_generator.py#L98-L106)
-
-### 响应长度优化配置详解
-- **配置变更**：
-  - `LlmConfig.max_tokens`：从 2048 降至 1200
-  - `AppConfig.llm_max_tokens`：从 2048 降至 1200
-  - 环境变量：`LLM_MAX_TOKENS` 默认值 1200
-- **中文 Token 估算**：
-  - 约 1 token ≈ 1-1.5 个中文字符
-  - 1200 tokens ≈ 1000-1800 个中文字符
-  - 配合系统提示词限制，实际输出约 1000 字以内
-- **双重保障机制**：
-  - 配置层：max_tokens 限制最大生成长度
-  - 提示词层：系统提示词中的严格字数限制指令
-  - 效果：确保回复内容完整且不超出合理长度
-
-**更新**：新增响应长度优化配置的详细说明，帮助开发者理解配置变更的影响和原理。
-
-章节来源
-- [server/config.py:16-21](file://server/config.py#L16-L21)
-- [server/config.py:94-97](file://server/config.py#L94-L97)
-- [server/resources/default_system_prompt.txt:30-33](file://server/resources/default_system_prompt.txt#L30-L33)
