@@ -23,7 +23,14 @@ image.tar
 node_modules/
 dist/
 
+# 包含真实密钥的本地覆盖配置（请勿提交！）
+.env.local
+config.local.json
+
 # 项目根目录的调试截图（请改用 tmp/ 或加 screenshot_/debug_ 前缀）
 /_screenshot_*.png
 /_debug_*.png
 /_*.tmp.png
+
+# 备份文件（脱敏流程临时生成）
+*.original.bak
