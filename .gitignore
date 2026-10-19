@@ -1,6 +1,16 @@
 # 临时/调试验证文件
 tmp/
 
+# IDE 缓存与知识库（Qoder repowiki）
+.qoder/
+
+# 调试截图/帧提取
+_check_idle/
+vibe_images/
+tmp_fix_frames/
+# 仓库备份包
+*.bundle
+
 # 部署中间产物
 deploy/
 
@@ -26,6 +36,18 @@ dist/
 # 包含真实密钥的本地覆盖配置（请勿提交！）
 .env.local
 config.local.json
+.env.production.local
+
+# clips 视频切片：仅保留 .mkv 原始源文件 + .webm 运行时产物；备份/中间产物忽略
+clips/short-hair-teacher-girl/.mp4/
+clips/short-hair-teacher-girl/.mp4_backup/
+clips/short-hair-teacher-girl/.v53_backup/
+clips/short-hair-teacher-girl/idle_backup/
+clips/short-hair-teacher-girl/idle/*.mp4
+clips/short-hair-teacher-girl/idle/*.webm.bak*
+clips/**/*.webm
+# 允许运行时必需的待机动画切片
+!clips/short-hair-teacher-girl/idle/idle_breathing.webm
 
 # 项目根目录的调试截图（请改用 tmp/ 或加 screenshot_/debug_ 前缀）
 /_screenshot_*.png
