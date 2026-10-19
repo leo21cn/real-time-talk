@@ -2,8 +2,30 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1.0" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover" />
 <title>RealTimeTalk · 让对话有表情、有声音、有知识</title>
+<meta name="description" content="以卡通形象「普兰」为载体的 Web 端实时对话 AI 助手：动画形象 + 同步语音 + 打字机气泡 + 专项知识库，长回复流式分段生成、逐段播放。" />
+
+<!-- 微信 / 社交分享卡片 -->
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="RealTimeTalk" />
+<meta property="og:title" content="RealTimeTalk · 让对话有表情、有声音、有知识" />
+<meta property="og:description" content="以卡通形象为载体的实时对话 AI 助手：动画形象 + 同步语音 + 打字机气泡 + 专项知识库。" />
+<meta property="og:image" content="https://pulan.smartmoves.com.cn/share-icon.png" />
+<meta property="og:image:type" content="image/png" />
+<meta property="og:image:width" content="512" />
+<meta property="og:image:height" content="512" />
+<meta property="og:url" content="https://pulan.smartmoves.com.cn/" />
+<meta itemprop="name" content="RealTimeTalk · 让对话有表情、有声音、有知识" />
+<meta itemprop="description" content="以卡通形象为载体的实时对话 AI 助手：动画形象 + 同步语音 + 打字机气泡 + 专项知识库。" />
+<meta itemprop="image" content="https://pulan.smartmoves.com.cn/share-icon.png" />
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:title" content="RealTimeTalk · 让对话有表情、有声音、有知识" />
+<meta name="twitter:description" content="以卡通形象为载体的实时对话 AI 助手，让每一次问答都有表情、有声音、有知识。" />
+<meta name="twitter:image" content="https://pulan.smartmoves.com.cn/share-icon.png" />
+
+<link rel="icon" type="image/png" href="/favicon.png" />
+<link rel="apple-touch-icon" href="/share-icon.png" />
 <style>
   /* ---------- 基础与排版 ---------- */
   :root {
@@ -40,6 +62,7 @@
     position: relative;
     width: 100vw;
     height: 100vh;
+    height: 100dvh;
     overflow: hidden;
   }
 
@@ -49,16 +72,27 @@
     padding: 64px 88px 80px;
     display: flex;
     flex-direction: column;
-    justify-content: center;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
     opacity: 0;
     transform: translateX(40px);
     transition: opacity .5s ease, transform .5s ease;
     pointer-events: none;
   }
+  .slide::-webkit-scrollbar { width: 0; height: 0; }
   .slide.active {
     opacity: 1;
     transform: translateX(0);
     pointer-events: auto;
+  }
+
+  /* 内容框：内容放得下时垂直居中，放不下时从顶部开始并可滚动 */
+  .frame {
+    width: 100%;
+    margin: auto 0;
+    flex-shrink: 0;
   }
 
   /* ---------- 顶部 / 底部 装饰条 ---------- */
@@ -80,10 +114,16 @@
   .top-bar .brand {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     font-weight: 600;
     color: var(--ink);
     letter-spacing: .5px;
+  }
+  .top-bar .brand-logo {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    object-fit: cover;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08);
   }
   .top-bar .brand-dot {
     width: 8px; height: 8px;
@@ -236,6 +276,21 @@
     font-size: 20px;
     font-weight: 700;
     margin-bottom: 14px;
+    flex-shrink: 0;
+  }
+  .card .icon svg {
+    width: 66%; height: 66%;
+    display: block;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .ico-sprite {
+    position: absolute;
+    width: 0; height: 0;
+    overflow: hidden;
   }
   .card h4 {
     margin: 0 0 8px;
@@ -492,7 +547,7 @@
   /* ---------- 封面 ---------- */
   .cover {
     text-align: left;
-    max-width: calc(100vw - 480px);
+    max-width: calc(100vw - 540px);
   }
   .cover .eyebrow { margin-bottom: 24px; }
   .cover h1 {
@@ -533,47 +588,88 @@
     text-transform: none;
   }
 
-  /* 封面装饰：右侧抽象图形 */
+  /* 封面装饰：右侧人物肖像 */
   .cover-art {
     position: absolute;
     right: 88px;
     top: 50%;
     transform: translateY(-50%);
-    width: 320px;
-    height: 320px;
+    width: 300px;
+    height: 420px;
     pointer-events: none;
-  }
-  .avatar-circle {
-    width: 100%; height: 100%;
-    border-radius: 50%;
-    background: radial-gradient(circle at 30% 30%, var(--accent-soft), #fafafa 70%);
-    border: 1px solid var(--line);
-    position: relative;
     display: flex;
     align-items: center;
     justify-content: center;
   }
-  .avatar-circle::before {
-    content: "普兰";
-    font-size: 42px;
-    font-weight: 700;
-    color: var(--accent);
-    letter-spacing: 4px;
+  .avatar-frame {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    border-radius: 24px;
+    background: linear-gradient(180deg, var(--accent-soft) 0%, #fafafa 100%);
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow-strong);
+    overflow: hidden;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding-top: 44px;
   }
-  .pulse {
+  .avatar-img {
+    height: 100%;
+    width: auto;
+    object-fit: contain;
+    object-position: bottom center;
+    filter: drop-shadow(0 8px 20px rgba(0,0,0,.10));
+    animation: float 5s ease-in-out infinite;
+  }
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50%      { transform: translateY(-6px); }
+  }
+  .avatar-tag {
     position: absolute;
-    inset: -16px;
-    border-radius: 50%;
-    border: 1px solid var(--accent);
-    opacity: .25;
-    animation: pulse 2.4s ease-out infinite;
+    top: 14px;
+    left: 14px;
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-size: 12px;
+    color: var(--ink-soft);
+    letter-spacing: 1px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.04);
   }
-  .pulse.p2 { animation-delay: .8s; }
-  .pulse.p3 { animation-delay: 1.6s; }
-  @keyframes pulse {
-    0%   { transform: scale(.92); opacity: .35; }
-    80%  { transform: scale(1.18); opacity: 0; }
-    100% { transform: scale(1.18); opacity: 0; }
+  .avatar-tag::before {
+    content: "";
+    display: inline-block;
+    width: 6px; height: 6px;
+    background: var(--accent);
+    border-radius: 50%;
+    margin-right: 6px;
+    vertical-align: middle;
+    animation: blink 2s ease-in-out infinite;
+  }
+  @keyframes blink {
+    0%, 90%, 100% { opacity: 1; }
+    95% { opacity: .25; }
+  }
+  .avatar-caption {
+    position: absolute;
+    bottom: 14px;
+    right: 14px;
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 12px;
+    color: var(--ink-soft);
+    box-shadow: 0 1px 3px rgba(0,0,0,.04);
+  }
+  .avatar-caption strong {
+    color: var(--accent);
+    font-weight: 600;
+    margin-right: 4px;
   }
 
   /* ---------- 列表 ---------- */
@@ -626,8 +722,10 @@
   .muted { color: var(--ink-mute); }
   .small { font-size: 13px; color: var(--ink-mute); }
 
+  /* ============ 响应式：平板 ============ */
   @media (max-width: 1100px) {
     .slide { padding: 64px 48px 80px; }
+    .cover { max-width: 100%; }
     .cover h1 { font-size: 60px; }
     h1.slide-title { font-size: 40px; }
     h2.slide-title { font-size: 32px; }
@@ -636,14 +734,240 @@
     .grid-4 { grid-template-columns: 1fr 1fr; }
     .steps { grid-template-columns: repeat(5, 1fr); font-size: 11px; }
   }
+
+  /* ============ 响应式：竖屏平板与手机 ============ */
+  @media (max-width: 860px) {
+    .slide {
+      padding: 74px 28px calc(88px + env(safe-area-inset-bottom, 0px));
+      transform: translateY(18px);
+      -webkit-overflow-scrolling: touch;
+    }
+    .slide.active { transform: translateY(0); }
+
+    /* 顶栏 / 底栏 */
+    .top-bar { height: 54px; padding: 0 18px; font-size: 12px; }
+    .top-bar .brand { gap: 8px; letter-spacing: 0; }
+    .top-bar .brand-logo { width: 24px; height: 24px; }
+    .bottom-bar {
+      height: calc(52px + env(safe-area-inset-bottom, 0px));
+      padding: 0 16px env(safe-area-inset-bottom, 0px);
+    }
+    .nav-btn { width: 30px; height: 30px; font-size: 13px; }
+    .dots { gap: 5px; }
+    .dot { width: 5px; height: 5px; }
+    .dot.active { width: 18px; }
+
+    /* 封面：立绘移到文字下方 */
+    .cover .sub { font-size: 16px; max-width: 100%; }
+    .cover .meta { flex-direction: column; gap: 18px; margin-top: 30px; }
+    .cover-art {
+      position: static;
+      transform: none;
+      display: flex;
+      width: min(300px, 66%);
+      height: 340px;
+      margin: 30px auto 0;
+    }
+    .avatar-frame { padding-top: 46px; }
+    .avatar-img { height: calc(100% - 16px); }
+
+    /* 网格与卡片 */
+    .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+    .card { padding: 20px; }
+    .card:hover { transform: none; box-shadow: var(--shadow); }
+
+    /* 对比表：上下堆叠 */
+    .compare { grid-template-columns: 1fr; }
+    .compare .col { padding: 24px 20px; }
+    .compare .col-mid {
+      border-left: none;
+      border-right: none;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      padding: 10px 0;
+      font-size: 0;
+    }
+    .compare .col-mid::after { content: "↓"; font-size: 18px; }
+
+    /* 数字 */
+    .stat-row { display: grid; grid-template-columns: 1fr 1fr; gap: 22px 16px; margin-top: 26px; }
+    .stat .num { font-size: 34px; }
+
+    /* 架构图 */
+    .arch { padding: 16px; gap: 10px; }
+    .arch-layer { flex-direction: column; align-items: flex-start; gap: 10px; padding: 14px 16px; }
+    .arch-layer .layer-tag { width: auto; }
+
+    /* 五步流程：竖排列表 */
+    .steps { grid-template-columns: 1fr; padding: 18px; }
+    .step {
+      text-align: left;
+      border-right: none;
+      border-bottom: 1px dashed var(--line);
+      padding: 14px 0;
+      display: grid;
+      grid-template-columns: 30px 1fr;
+      column-gap: 12px;
+      align-items: start;
+    }
+    .step:last-child { border-bottom: none; }
+    .step .step-num { margin: 0; grid-row: span 2; }
+    .step h5 { margin: 0 0 4px; }
+
+    /* 联系 */
+    .contact { grid-template-columns: 1fr; gap: 16px; }
+    .contact-card { padding: 22px; }
+    .contact-card .value { font-size: 17px; }
+  }
+
+  /* ============ 响应式：手机竖屏 ============ */
+  @media (max-width: 640px) {
+    .slide { padding: 66px 18px calc(84px + env(safe-area-inset-bottom, 0px)); }
+    .cover h1 { font-size: clamp(24px, calc(7.4vw - 3px), 38px); letter-spacing: -.5px; margin-bottom: 18px; }
+    h2.slide-title { font-size: clamp(23px, 6.6vw, 30px); letter-spacing: 0; margin-bottom: 18px; text-wrap: balance; }
+    .lead { font-size: 15px; line-height: 1.75; margin-bottom: 14px; }
+    .eyebrow { font-size: 11px; letter-spacing: 3px; margin-bottom: 14px; }
+    .accent-line { margin: 18px 0; }
+    .cover .eyebrow { margin-bottom: 20px; }
+    .cover .sub { font-size: 15px; }
+    .cover .meta { gap: 14px; margin-top: 24px; font-size: 12px; }
+    .cover .meta-item strong { font-size: 13px; }
+    .cover-art { width: min(260px, 70%); height: 300px; margin-top: 24px; }
+    .grid { gap: 14px; }
+    .card { padding: 18px 16px; border-radius: 10px; }
+    .card .icon { width: 34px; height: 34px; font-size: 17px; margin-bottom: 10px; }
+    .card h4 { font-size: 15px; }
+    .card p { font-size: 13px; }
+    .compare .col { padding: 20px 16px; }
+    .compare h4 { font-size: 12px; margin-bottom: 12px; }
+    .compare li { font-size: 13.5px; padding: 6px 0; }
+    .stat .num { font-size: 30px; }
+    .stat .label { font-size: 12px; }
+    .chip { font-size: 12px; padding: 5px 10px; }
+    .tag-chip { font-size: 12px; padding: 5px 12px; }
+    .tag-cloud { gap: 6px; margin-top: 14px; }
+    .contact-card .value { font-size: 16px; }
+    .contact-card .hint { font-size: 12px; }
+  }
+
+  /* ============ 响应式：手机横屏 ============ */
+  @media (orientation: landscape) and (max-height: 560px) {
+    .slide { padding: 62px 26px calc(66px + env(safe-area-inset-bottom, 0px)); }
+    .cover-art { display: none; }
+    .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr 1fr; }
+    .steps { grid-template-columns: 1fr 1fr; }
+    .cover h1 { font-size: clamp(24px, 6vh, 34px); margin-bottom: 12px; }
+    .cover .eyebrow { margin-bottom: 12px; }
+    .cover .sub { font-size: 13px; line-height: 1.6; margin-bottom: 14px; }
+    .cover .meta { flex-direction: row; flex-wrap: wrap; gap: 10px 24px; margin-top: 14px; }
+    .cover .meta-item strong { font-size: 13px; }
+    .cover .accent-line { margin: 8px 0; }
+    h2.slide-title { font-size: clamp(20px, 4.4vh, 28px); margin-bottom: 14px; }
+    .lead { font-size: 14px; line-height: 1.6; margin-bottom: 10px; }
+    .accent-line { margin: 10px 0; }
+    .card { padding: 14px; }
+    .card p { font-size: 12px; }
+    .stat-row { grid-template-columns: repeat(4, 1fr); gap: 14px; }
+    .stat .num { font-size: 26px; }
+  }
+
+  /* ============ 响应式：矮桌面窗口（1600×900 等） ============ */
+  @media (min-width: 861px) and (max-height: 940px) {
+    .slide { padding: 48px 64px 64px; }
+    h2.slide-title { font-size: 40px; margin-bottom: 18px; }
+    .lead { font-size: 18px; line-height: 1.65; margin-bottom: 12px; }
+    .eyebrow { margin-bottom: 14px; }
+    .grid { gap: 16px; }
+    .accent-line { margin: 16px 0; }
+    .arch { padding: 18px; gap: 10px; }
+    .arch-layer { padding: 12px 16px; }
+    .steps { padding: 20px 14px; }
+    .step p { font-size: 11px; }
+    .card { padding: 18px; }
+    .card .icon { width: 34px; height: 34px; font-size: 18px; margin-bottom: 10px; }
+    .compare .col { padding: 24px 22px; }
+    .compare li { font-size: 14px; padding: 6px 0; }
+    .stat-row { margin-top: 20px; gap: 44px; }
+    .stat .num { font-size: 38px; }
+    .contact-card { padding: 24px; }
+  }
+
+  /* ============ 响应式：更矮的桌面窗口（1366×768 等） ============ */
+  @media (min-width: 861px) and (max-height: 820px) {
+    h2.slide-title { font-size: 34px; margin-bottom: 14px; }
+    .lead { font-size: 16px; line-height: 1.6; margin-bottom: 8px; }
+    .eyebrow { margin-bottom: 10px; }
+    .accent-line { margin: 10px 0; }
+    .grid { gap: 12px; }
+    .arch { padding: 14px; gap: 8px; }
+    .arch-layer { padding: 9px 14px; }
+    .steps { padding: 14px 12px; }
+    .card { padding: 14px 16px; }
+    .card .icon { width: 30px; height: 30px; font-size: 16px; margin-bottom: 8px; }
+    .card p { font-size: 13px; }
+    .compare .col { padding: 20px 18px; }
+    .stat-row { margin-top: 16px; }
+    .stat .num { font-size: 34px; }
+    .contact-card { padding: 20px; }
+  }
 </style>
 </head>
 <body>
 
+<svg class="ico-sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-avatar" viewBox="0 0 24 24">
+    <circle cx="12" cy="8" r="3.6"/>
+    <path d="M4.8 20.5a7.2 7.2 0 0 1 14.4 0"/>
+  </symbol>
+  <symbol id="i-wave" viewBox="0 0 24 24">
+    <path d="M4 10.5v3"/>
+    <path d="M8 7.5v9"/>
+    <path d="M12 4.5v15"/>
+    <path d="M16 8v8"/>
+    <path d="M20 10.5v3"/>
+  </symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24">
+    <path d="M12 3.2 20 7.6 12 12 4 7.6z"/>
+    <path d="M4 12.2 12 16.6 20 12.2"/>
+    <path d="M4 16.6 12 21 20 16.6"/>
+  </symbol>
+  <symbol id="i-pulse" viewBox="0 0 24 24">
+    <path d="M3 12h3.5l2-5 3 10 2.5-7 1.5 4H21"/>
+  </symbol>
+  <symbol id="i-cube" viewBox="0 0 24 24">
+    <path d="M12 3.2 20 7.6v8.8L12 20.8 4 16.4V7.6z"/>
+    <path d="M4 7.6 12 12l8-4.4"/>
+    <path d="M12 12v8.8"/>
+  </symbol>
+  <symbol id="i-nodes" viewBox="0 0 24 24">
+    <circle cx="12" cy="5.2" r="2.2"/>
+    <circle cx="5.6" cy="17.2" r="2.2"/>
+    <circle cx="18.4" cy="17.2" r="2.2"/>
+    <path d="M10.6 6.9 6.5 15.5"/>
+    <path d="M13.4 6.9 17.5 15.5"/>
+    <path d="M7.8 17.2h8.4"/>
+  </symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24">
+    <path d="M5 3.5v5.2"/>
+    <path d="M5 13.3v7.2"/>
+    <path d="M12 3.5v9.2"/>
+    <path d="M12 17.3v3.2"/>
+    <path d="M19 3.5v3.2"/>
+    <path d="M19 11.3v9.2"/>
+    <circle cx="5" cy="11" r="2.2"/>
+    <circle cx="12" cy="15" r="2.2"/>
+    <circle cx="19" cy="9" r="2.2"/>
+  </symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24">
+    <rect x="9.5" y="2.4" width="5" height="11.2" rx="2.5"/>
+    <path d="M6.2 11a5.8 5.8 0 0 0 11.6 0"/>
+    <path d="M12 16.8v3.4"/>
+  </symbol>
+</svg>
+
 <!-- ============== 顶部条 ============== -->
 <div class="top-bar">
-  <div class="brand"><span class="brand-dot"></span>RealTimeTalk · 实时对话 AI 助手</div>
-  <div>Open Source · MIT-style Internal</div>
+  <div class="brand"><img class="brand-logo" src="pulan-logo.png" alt="普兰" />RealTimeTalk · 实时对话 AI 助手</div>
 </div>
 
 <!-- ============== 底部导航 ============== -->
@@ -661,143 +985,158 @@
 
   <!-- ============ 01 封面 ============ -->
   <section class="slide active" data-title="封面">
-    <div class="cover">
-      <div class="eyebrow">REAL · INTERACTIVE · KNOWLEDGEABLE</div>
-      <h1>让对话<br/>有表情、<span class="accent">有声音</span>、有知识</h1>
-      <p class="sub">
-        RealTimeTalk 是一套以卡通形象为载体的 Web 端实时对话 AI 助手。<br/>
-        动画形象 + 同步语音 + 打字机气泡 + 专项知识库，<br/>
-        让"问与答"真正成为一场有温度的交流，而非冷冰冰的文字罗列。
-      </p>
-      <div class="accent-line"></div>
-      <div class="meta">
-        <div class="meta-item">
-          <span>形态</span>
-          <strong>Web 应用 · Docker 一键启动</strong>
+    <div class="frame">
+      <div class="cover">
+        <div class="eyebrow">REAL · INTERACTIVE · KNOWLEDGEABLE</div>
+        <h1>让对话<br/>有表情、<span class="accent">有声音</span>、有知识</h1>
+        <p class="sub">
+          RealTimeTalk 是一套以卡通形象为载体的 Web 端实时对话 AI 助手。<br/>
+          动画形象 + 同步语音 + 打字机气泡 + 专项知识库，<br/>
+          让"问与答"真正成为一场有温度的交流，而非冷冰冰的文字罗列。
+        </p>
+        <div class="accent-line"></div>
+        <div class="meta">
+          <div class="meta-item">
+            <span>形态</span>
+            <strong>Web 应用 · Docker 一键启动</strong>
+          </div>
+          <div class="meta-item">
+            <span>技术栈</span>
+            <strong>FastAPI · React · WebSocket · RAG</strong>
+          </div>
+          <div class="meta-item">
+            <span>开源</span>
+            <strong>github.com/leo21cn/real-time-talk</strong>
+          </div>
         </div>
-        <div class="meta-item">
-          <span>技术栈</span>
-          <strong>FastAPI · React · WebSocket · RAG</strong>
-        </div>
-        <div class="meta-item">
-          <span>开源</span>
-          <strong>github.com/leo21cn/real-time-talk</strong>
-        </div>
-      </div>
     </div>
 
     <div class="cover-art">
-      <div class="avatar-circle">
-        <div class="pulse"></div>
-        <div class="pulse p2"></div>
-        <div class="pulse p3"></div>
+      <div class="avatar-frame">
+        <span class="avatar-tag">Live · 在线</span>
+        <img class="avatar-img" src="pulan-avatar.png" alt="普兰卡通形象" />
+        <div class="avatar-caption"><strong>普兰</strong>· 知识助手</div>
       </div>
+    </div>
     </div>
   </section>
 
   <!-- ============ 02 背景与简介 ============ -->
   <section class="slide" data-title="背景与简介">
-    <div class="eyebrow">01 · BACKGROUND</div>
-    <h2 class="slide-title">从"文字框"到"对话伙伴"的演进</h2>
-    <p class="lead">
-      大模型让机器第一次能"听懂人话"，但大多数对话产品仍停留在<strong>输入框 + 文字流</strong>的体验里——
-      缺少形象、缺少声音、缺少"它就在那里"的临场感。
-    </p>
-    <p class="lead">
-      RealTimeTalk 把对话的载体升级为一位可亲的卡通形象 <strong>"普兰"</strong>：
-      她会呼吸、会眨眼、会思考、会说话、会讲解、会总结——
-      让每一次问答都像是在与一位真实坐在你面前的知识伙伴交谈。
-    </p>
+    <div class="frame">
+      <div class="eyebrow">01 · BACKGROUND</div>
+      <h2 class="slide-title">从"文字框"到"对话伙伴"的演进</h2>
+      <p class="lead">
+        大模型让机器第一次能"听懂人话"，但大多数对话产品仍停留在<strong>输入框 + 文字流</strong>的体验里——
+        缺少形象、缺少声音、缺少"它就在那里"的临场感。
+      </p>
+      <p class="lead">
+        RealTimeTalk 把对话的载体升级为一位可亲的卡通形象 <strong>"普兰"</strong>：
+        她会呼吸、会眨眼、会思考、会说话、会讲解、会总结——
+        让每一次问答都像是在与一位真实坐在你面前的知识伙伴交谈。
+      </p>
 
-    <div class="grid grid-4 mt-32">
-      <div class="card">
-        <div class="icon">🎭</div>
-        <h4>有表情的形象</h4>
-        <p>实时语义切片动画，匹配讲解、强调、对比、举例等表达意图。</p>
-      </div>
-      <div class="card">
-        <div class="icon">🔊</div>
-        <h4>有温度的声音</h4>
-        <p>Cherry 音色 TTS 合成，与动画口型、手势同步播放。</p>
-      </div>
-      <div class="card">
-        <div class="icon">📚</div>
-        <h4>有依据的知识</h4>
-        <p>内置 RAG 向量检索，引用专项知识库作答，有据可查。</p>
-      </div>
-      <div class="card">
-        <div class="icon">⚡</div>
-        <h4>有节奏的对话</h4>
-        <p>流式分段生成 + 确认式播放，长回复也能丝滑衔接。</p>
-      </div>
+      <div class="grid grid-4 mt-32">
+        <div class="card">
+<div class="icon">
+          <svg class="ico" aria-hidden="true"><use href="#i-avatar"/></svg>
+        </div>
+          <h4>有表情的形象</h4>
+          <p>实时语义切片动画，匹配讲解、强调、对比、举例等表达意图。</p>
+        </div>
+        <div class="card">
+<div class="icon">
+          <svg class="ico" aria-hidden="true"><use href="#i-wave"/></svg>
+        </div>
+          <h4>有温度的声音</h4>
+          <p>Cherry 音色 TTS 合成，与动画口型、手势同步播放。</p>
+        </div>
+        <div class="card">
+<div class="icon">
+          <svg class="ico" aria-hidden="true"><use href="#i-layers"/></svg>
+        </div>
+          <h4>有依据的知识</h4>
+          <p>内置 RAG 向量检索，引用专项知识库作答，有据可查。</p>
+        </div>
+        <div class="card">
+<div class="icon">
+          <svg class="ico" aria-hidden="true"><use href="#i-pulse"/></svg>
+        </div>
+          <h4>有节奏的对话</h4>
+          <p>流式分段生成 + 确认式播放，长回复也能丝滑衔接。</p>
+        </div>
+    </div>
     </div>
   </section>
 
   <!-- ============ 03 待解决问题 ============ -->
   <section class="slide" data-title="待解决问题">
-    <div class="eyebrow">02 · PROBLEMS</div>
-    <h2 class="slide-title">现有对话产品的三个"不够好"</h2>
-    <p class="lead">当用户面对一段长回复时，最常见的体验问题是什么？</p>
+    <div class="frame">
+      <div class="eyebrow">02 · PROBLEMS</div>
+      <h2 class="slide-title">现有对话产品的三个"不够好"</h2>
+      <p class="lead">当用户面对一段长回复时，最常见的体验问题是什么？</p>
 
-    <div class="grid grid-3 mt-12">
-      <div class="card">
-        <div class="icon">1</div>
-        <h4>注意力难以聚焦</h4>
-        <p>大段回复仅以纯文字呈现，用户需要自行在脑中"重建画面"，认知负担重、阅读疲劳感强。</p>
-      </div>
-      <div class="card">
-        <div class="icon">2</div>
-        <h4>缺乏情感与温度</h4>
-        <p>静态头像或无形象让对话显得"工具化"，用户难以建立信任与持续互动的意愿。</p>
-      </div>
-      <div class="card">
-        <div class="icon">3</div>
-        <h4>专业知识无据可依</h4>
-        <p>通用模型容易"一本正经地胡说"，在企业知识问答、客服、教学等场景难以独立承担关键决策。</p>
-      </div>
+      <div class="grid grid-3 mt-12">
+        <div class="card">
+          <div class="icon">1</div>
+          <h4>注意力难以聚焦</h4>
+          <p>大段回复仅以纯文字呈现，用户需要自行在脑中"重建画面"，认知负担重、阅读疲劳感强。</p>
+        </div>
+        <div class="card">
+          <div class="icon">2</div>
+          <h4>缺乏情感与温度</h4>
+          <p>静态头像或无形象让对话显得"工具化"，用户难以建立信任与持续互动的意愿。</p>
+        </div>
+        <div class="card">
+          <div class="icon">3</div>
+          <h4>专业知识无据可依</h4>
+          <p>通用模型容易"一本正经地胡说"，在企业知识问答、客服、教学等场景难以独立承担关键决策。</p>
+        </div>
     </div>
 
     <div class="accent-line"></div>
     <p class="lead" style="font-size: 18px;">
       结论很直接 —— <strong>仅靠"文字 + 静态形象"的方案，无法承载专业、可信、有温度的实时对话需求。</strong>
     </p>
+    </div>
   </section>
 
   <!-- ============ 04 解决方案 ============ -->
   <section class="slide" data-title="解决方案">
-    <div class="eyebrow">03 · SOLUTION</div>
-    <h2 class="slide-title">从"看文字"升级为"听 +看 +感受"</h2>
-    <p class="lead">
-      实时动画形象 + 同步语音 + 打字机气泡 + 专项知识库，<strong>相较于完全不动的形象 + 文字对话，能带来显著更优的用户体验</strong>——
-      这是 RealTimeTalk 最朴素、也最关键的差异化。
-    </p>
+    <div class="frame">
+      <div class="eyebrow">03 · SOLUTION</div>
+      <h2 class="slide-title">从"看文字"升级为"听 +看 +感受"</h2>
+      <p class="lead">
+        实时动画形象 + 同步语音 + 打字机气泡 + 专项知识库，<strong>相较于完全不动的形象 + 文字对话，能带来显著更优的用户体验</strong>——
+        这是 RealTimeTalk 最朴素、也最关键的差异化。
+      </p>
 
-    <div class="compare mt-24">
-      <div class="col left">
-        <span class="tag tag-old">传统方案</span>
-        <h4>静态形象 / 无形象 + 纯文字</h4>
-        <ul>
-          <li>形象固定不动，缺乏真实交流感</li>
-          <li>用户必须自行阅读，无语音陪伴</li>
-          <li>长回复一次性涌出，节奏拖沓</li>
-          <li>知识无法溯源，幻觉难以察觉</li>
-          <li>多轮对话上下文易丢失</li>
-          <li>弱网下段间停顿明显</li>
-        </ul>
-      </div>
-      <div class="col-mid">→</div>
-      <div class="col right">
-        <span class="tag tag-new">RealTimeTalk</span>
-        <h4>实时动画形象 + 语音 + 知识</h4>
-        <ul>
-          <li>待机呼吸 / 思考 / 讲解 / 强调 等 11+ 种语义动作实时切换</li>
-          <li>TTS 同步配音，逐字打字机气泡与声音严格对齐</li>
-          <li>流式分段 + 确认式播放，长回复节奏自然</li>
-          <li>RAG 检索专项知识，回复可引用、可溯源</li>
-          <li>智能摘要保留上下文，Token 溢出不丢记忆</li>
-          <li>客户端 L1/L2 双层缓存，弱网段间停顿 &lt; 200ms</li>
-        </ul>
-      </div>
+      <div class="compare mt-24">
+        <div class="col left">
+          <span class="tag tag-old">传统方案</span>
+          <h4>静态形象 / 无形象 + 纯文字</h4>
+          <ul>
+            <li>形象固定不动，缺乏真实交流感</li>
+            <li>用户必须自行阅读，无语音陪伴</li>
+            <li>长回复一次性涌出，节奏拖沓</li>
+            <li>知识无法溯源，幻觉难以察觉</li>
+            <li>多轮对话上下文易丢失</li>
+            <li>弱网下段间停顿明显</li>
+          </ul>
+        </div>
+        <div class="col-mid">→</div>
+        <div class="col right">
+          <span class="tag tag-new">RealTimeTalk</span>
+          <h4>实时动画形象 + 语音 + 知识</h4>
+          <ul>
+            <li>待机呼吸 / 思考 / 讲解 / 强调 等 11+ 种语义动作实时切换</li>
+            <li>TTS 同步配音，逐字打字机气泡与声音严格对齐</li>
+            <li>流式分段 + 确认式播放，长回复节奏自然</li>
+            <li>RAG 检索专项知识，回复可引用、可溯源</li>
+            <li>智能摘要保留上下文，Token 溢出不丢记忆</li>
+            <li>客户端 L1/L2 双层缓存，弱网段间停顿 &lt; 200ms</li>
+          </ul>
+        </div>
     </div>
 
     <div class="stat-row">
@@ -818,121 +1157,133 @@
         <div class="label">流式首段目标延迟</div>
       </div>
     </div>
+    </div>
   </section>
 
   <!-- ============ 05 技术架构 ============ -->
   <section class="slide" data-title="技术架构">
-    <div class="eyebrow">04 · ARCHITECTURE</div>
-    <h2 class="slide-title">前后端一体、内外分工的全栈架构</h2>
-    <p class="lead">
-      前端 React SPA 负责形象、语音、气泡与交互；后端 FastAPI 负责 LLM / TTS / 视频拼接流水线；
-      知识与会话经由 Qdrant + Redis + MinIO 协同支撑；外部能力通过 OpenAI 兼容协议与 DashScope 对接。
-    </p>
+    <div class="frame">
+      <div class="eyebrow">04 · ARCHITECTURE</div>
+      <h2 class="slide-title">前后端一体、内外分工的全栈架构</h2>
+      <p class="lead">
+        前端 React SPA 负责形象、语音、气泡与交互；后端 FastAPI 负责 LLM / TTS / 视频拼接流水线；
+        知识与会话经由 Qdrant + Redis + MinIO 协同支撑；外部能力通过 OpenAI 兼容协议与 DashScope 对接。
+      </p>
 
-    <div class="arch mt-24">
-      <div class="arch-layer accent">
-        <div class="layer-tag">前端</div>
-        <div class="layer-content">
-          <div class="chip">React 18 + Vite</div>
-          <div class="chip">WebSocket Client</div>
-          <div class="chip">WebM VP9 Alpha 形象</div>
-          <div class="chip">IndexedDB L2 缓存</div>
+      <div class="arch mt-24">
+        <div class="arch-layer">
+          <div class="layer-tag">前端</div>
+          <div class="layer-content">
+            <div class="chip">React 18 + Vite</div>
+            <div class="chip">WebSocket Client</div>
+            <div class="chip">WebM VP9 Alpha 形象</div>
+            <div class="chip">IndexedDB L2 缓存</div>
+          </div>
         </div>
-      </div>
-      <div class="arrow-down">↓</div>
-      <div class="arch-layer">
-        <div class="layer-tag">网关</div>
-        <div class="layer-content">
-          <div class="chip">Nginx 反向代理</div>
-          <div class="chip">/api · /ws 反代</div>
-          <div class="chip">HTTPS 终止</div>
+        <div class="arrow-down">↓</div>
+        <div class="arch-layer">
+          <div class="layer-tag">网关</div>
+          <div class="layer-content">
+            <div class="chip">Nginx 反向代理</div>
+            <div class="chip">/api · /ws 反代</div>
+            <div class="chip">HTTPS 终止</div>
+          </div>
         </div>
-      </div>
-      <div class="arrow-down">↓</div>
-      <div class="arch-layer accent">
-        <div class="layer-tag">核心</div>
-        <div class="layer-content">
-          <div class="chip">FastAPI · asyncio</div>
-          <div class="chip">Agent 对话引擎</div>
-          <div class="chip">StreamingPipeline 流式分段</div>
-          <div class="chip">FFmpeg stream copy 拼接</div>
-          <div class="chip">WebSocket 状态机</div>
+        <div class="arrow-down">↓</div>
+        <div class="arch-layer accent">
+          <div class="layer-tag">核心</div>
+          <div class="layer-content">
+            <div class="chip">FastAPI · asyncio</div>
+            <div class="chip">Agent 对话引擎</div>
+            <div class="chip">StreamingPipeline 流式分段</div>
+            <div class="chip">FFmpeg stream copy 拼接</div>
+            <div class="chip">WebSocket 状态机</div>
+          </div>
         </div>
-      </div>
-      <div class="arrow-down">↓</div>
-      <div class="arch-layer">
-        <div class="layer-tag">存储</div>
-        <div class="layer-content">
-          <div class="chip">Redis · 会话与历史</div>
-          <div class="chip">MinIO · 视频/音频</div>
-          <div class="chip">Qdrant · 向量知识库</div>
+        <div class="arrow-down">↓</div>
+        <div class="arch-layer">
+          <div class="layer-tag">存储</div>
+          <div class="layer-content">
+            <div class="chip">Redis · 会话与历史</div>
+            <div class="chip">MinIO · 视频/音频</div>
+            <div class="chip">Qdrant · 向量知识库</div>
+          </div>
         </div>
-      </div>
-      <div class="arrow-down">↓</div>
-      <div class="arch-layer">
-        <div class="layer-tag">外部</div>
-        <div class="layer-content">
-          <div class="chip">OpenAI 兼容 LLM</div>
-          <div class="chip">DashScope TTS · Cherry</div>
-          <div class="chip">DashScope ASR · qwen3-asr-flash</div>
-          <div class="chip">DashScope Embedding v3</div>
+        <div class="arrow-down">↓</div>
+        <div class="arch-layer">
+          <div class="layer-tag">外部</div>
+          <div class="layer-content">
+            <div class="chip">OpenAI 兼容 LLM</div>
+            <div class="chip">DashScope TTS · Cherry</div>
+            <div class="chip">DashScope ASR · qwen3-asr-flash</div>
+            <div class="chip">DashScope Embedding v3</div>
+          </div>
         </div>
-      </div>
+    </div>
     </div>
   </section>
 
   <!-- ============ 06 实施方案 ============ -->
   <section class="slide" data-title="实施方案">
-    <div class="eyebrow">05 · IMPLEMENTATION</div>
-    <h2 class="slide-title">从环境到上线的五步闭环</h2>
-    <p class="lead">RealTimeTalk 设计为开箱即用 —— 一份 Docker Compose 即可拉起完整全栈。</p>
+    <div class="frame">
+      <div class="eyebrow">05 · IMPLEMENTATION</div>
+      <h2 class="slide-title">从环境到上线的五步闭环</h2>
+      <p class="lead">RealTimeTalk 设计为开箱即用 —— 一份 Docker Compose 即可拉起完整全栈。</p>
 
-    <div class="steps mt-24">
-      <div class="step">
-        <div class="step-num">1</div>
-        <h5>准备环境</h5>
-        <p>Docker 20+ / Compose v2<br/>ECS 或任意 Linux 主机</p>
-      </div>
-      <div class="step">
-        <div class="step-num">2</div>
-        <h5>准备切片</h5>
-        <p>复制 .mkv 切片<br/>convert_clips.py 转 WebM</p>
-      </div>
-      <div class="step">
-        <div class="step-num">3</div>
-        <h5>填写配置</h5>
-        <p>.env 填入 LLM 与<br/>DashScope API Key</p>
-      </div>
-      <div class="step">
-        <div class="step-num">4</div>
-        <h5>一键启动</h5>
-        <p>docker compose up -d<br/>访问 localhost 即可使用</p>
-      </div>
-      <div class="step">
-        <div class="step-num">5</div>
-        <h5>知识接入</h5>
-        <p>管理后台创建<br/>pulan_* 集合并导入</p>
-      </div>
+      <div class="steps mt-24">
+        <div class="step">
+          <div class="step-num">1</div>
+          <h5>准备环境</h5>
+          <p>Docker 20+ / Compose v2<br/>ECS 或任意 Linux 主机</p>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <h5>准备切片</h5>
+          <p>复制 .mkv 切片<br/>convert_clips.py 转 WebM</p>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <h5>填写配置</h5>
+          <p>.env 填入 LLM 与<br/>DashScope API Key</p>
+        </div>
+        <div class="step">
+          <div class="step-num">4</div>
+          <h5>一键启动</h5>
+          <p>docker compose up -d<br/>访问 localhost 即可使用</p>
+        </div>
+        <div class="step">
+          <div class="step-num">5</div>
+          <h5>知识接入</h5>
+          <p>管理后台创建<br/>pulan_* 集合并导入</p>
+        </div>
     </div>
 
     <div class="grid grid-2 mt-32">
       <div class="card">
-        <div class="icon">🐳</div>
+<div class="icon">
+          <svg class="ico" aria-hidden="true"><use href="#i-cube"/></svg>
+        </div>
         <h4>本地一键启动</h4>
         <p class="small">Qdrant + Redis + MinIO + Server + Nginx 五件套编排，弱网环境依旧能跑通。</p>
       </div>
       <div class="card">
-        <div class="icon">☁️</div>
+<div class="icon">
+          <svg class="ico" aria-hidden="true"><use href="#i-nodes"/></svg>
+        </div>
         <h4>生产 Docker Swarm</h4>
         <p class="small">支持 ARM64 ECS 单节点发布，提供完整的 deploy-manual 操作手册。</p>
       </div>
       <div class="card">
-        <div class="icon">🛠️</div>
+<div class="icon">
+          <svg class="ico" aria-hidden="true"><use href="#i-sliders"/></svg>
+        </div>
         <h4>知识库管理后台</h4>
         <p class="small">独立 /admin 入口：集合管理、文档导入、检索测试，全可视化操作。</p>
       </div>
       <div class="card">
-        <div class="icon">🎙️</div>
+<div class="icon">
+          <svg class="ico" aria-hidden="true"><use href="#i-mic"/></svg>
+        </div>
         <h4>语音输入 (ASR)</h4>
         <p class="small">按住说话即可转写填入输入框，按 ESC 取消，移动端同样可用。</p>
       </div>
@@ -940,34 +1291,36 @@
 
     <div class="accent-line"></div>
     <p class="small muted">所有切片、对话、视频产物均在 Docker 容器内编排，配置与代码完全解耦，便于二次定制。</p>
+    </div>
   </section>
 
   <!-- ============ 07 开源与联系 ============ -->
   <section class="slide" data-title="开源与联系">
-    <div class="eyebrow">06 · OPEN SOURCE & CONTACT</div>
-    <h2 class="slide-title">开源、共建、欢迎交流</h2>
-    <p class="lead">
-      RealTimeTalk 是面向 AI 视频处理的项目管理问询助理原型，已开源全部代码、文档与切片方案。
-      欢迎 Star、Fork、提 Issue，也欢迎通过邮件交流应用场景与合作可能。
-    </p>
+    <div class="frame">
+      <div class="eyebrow">06 · OPEN SOURCE & CONTACT</div>
+      <h2 class="slide-title">开源、共建、欢迎交流</h2>
+      <p class="lead">
+        RealTimeTalk 是面向 AI 视频处理的项目管理问询助理原型，已开源全部代码、文档与切片方案。
+        欢迎 Star、Fork、提 Issue，也欢迎通过邮件交流应用场景与合作可能。
+      </p>
 
-    <div class="contact">
-      <div class="contact-card">
-        <div class="label">GitHub</div>
-        <div class="value">
-          <a href="https://github.com/leo21cn/real-time-talk" target="_blank" rel="noopener">
-            github.com/leo21cn/real-time-talk
-          </a>
+      <div class="contact">
+        <div class="contact-card">
+          <div class="label">GitHub</div>
+          <div class="value">
+            <a href="https://github.com/leo21cn/real-time-talk" target="_blank" rel="noopener">
+              github.com/leo21cn/real-time-talk
+            </a>
+          </div>
+          <div class="hint">完整的源码 · Docker 编排 · 需求/技术/测试规格文档 · 部署手册</div>
         </div>
-        <div class="hint">完整的源码 · Docker 编排 · 需求/技术/测试规格文档 · 部署手册</div>
-      </div>
-      <div class="contact-card">
-        <div class="label">联系邮箱</div>
-        <div class="value">
-          <a href="mailto:smartmoves@163.com">smartmoves@163.com</a>
+        <div class="contact-card">
+          <div class="label">联系邮箱</div>
+          <div class="value">
+            <a href="mailto:smartmoves@163.com">smartmoves@163.com</a>
+          </div>
+          <div class="hint">应用合作 · 切片定制 · 知识库集成 · 部署支持</div>
         </div>
-        <div class="hint">应用合作 · 切片定制 · 知识库集成 · 部署支持</div>
-      </div>
     </div>
 
     <div class="tag-cloud mt-32">
@@ -990,6 +1343,7 @@
       让 AI 不再只是一个"会回字的窗口"，而是一位<strong>有形象、有声音、有知识</strong>的对话伙伴。
     </p>
     <p class="small muted mt-12">© RealTimeTalk · 让对话有温度 · 2026</p>
+    </div>
   </section>
 
 </div>
@@ -1029,6 +1383,32 @@
 
     prevBtn.addEventListener('click', () => go(idx - 1));
     nextBtn.addEventListener('click', () => go(idx + 1));
+
+    // ---------- 触摸滑动翻页 ----------
+    (function () {
+      const deckEl = document.getElementById('deck');
+      let sx = 0, sy = 0, tracking = false;
+
+      deckEl.addEventListener('touchstart', (e) => {
+        if (e.touches.length !== 1) { tracking = false; return; }
+        sx = e.touches[0].clientX;
+        sy = e.touches[0].clientY;
+        tracking = true;
+      }, { passive: true });
+
+      deckEl.addEventListener('touchend', (e) => {
+        if (!tracking) return;
+        tracking = false;
+        const t = e.changedTouches[0];
+        const dx = t.clientX - sx;
+        const dy = t.clientY - sy;
+        // 需以横向为主且超过阈值才翻页，纵向手势留给页内滚动
+        if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.2) return;
+        go(dx < 0 ? idx + 1 : idx - 1);
+      }, { passive: true });
+
+      deckEl.addEventListener('touchcancel', () => { tracking = false; }, { passive: true });
+    })();
 
     document.addEventListener('keydown', (e) => {
       if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') {
